@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#276b4b"/>
+  <path d="M126 144h260v224H126z" fill="#ffffff" opacity=".12"/>
+  <path d="M160 182h192v30H160zM160 242h144v30H160zM160 302h176v30H160z" fill="#ffffff"/>
+  <circle cx="358" cy="316" r="54" fill="#f8ecd8"/>
+  <path d="M335 316l17 18 35-43" fill="none" stroke="#276b4b" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="256" y="438" text-anchor="middle" font-family="Arial, sans-serif" font-size="70" font-weight="800" fill="#ffffff">GP</text>
+</svg>

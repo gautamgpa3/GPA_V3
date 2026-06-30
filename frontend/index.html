@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#276b4b" />
+    <meta name="description" content="Gautam's PA personal work reminder and pending work tracker" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="icon.svg" />
+    <title>Gautam's PA</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">GP</div>
+          <div>
+            <h1>Gautam's PA</h1>
+            <p>Personal work assistant</p>
+          </div>
+        </div>
+
+        <nav class="nav" aria-label="Primary">
+          <button class="nav-item active" data-view="dashboard" title="Dashboard">
+            <span aria-hidden="true">⌂</span><span>Dashboard</span>
+          </button>
+          <button class="nav-item" data-view="tasks" title="Tasks">
+            <span aria-hidden="true">☑</span><span>Tasks</span>
+          </button>
+          <button class="nav-item" data-view="calendar" title="Calendar">
+            <span aria-hidden="true">□</span><span>Calendar</span>
+          </button>
+          <button class="nav-item" data-view="board" title="Board">
+            <span aria-hidden="true">▦</span><span>Board</span>
+          </button>
+          <button class="nav-item" data-view="reports" title="Reports">
+            <span aria-hidden="true">↗</span><span>Reports</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button class="icon-button wide" id="notificationBtn" title="Enable browser reminders">
+            <span aria-hidden="true">◉</span><span>Enable reminders</span>
+          </button>
+          <button class="icon-button wide" id="exportBtn" title="Export all tasks to CSV">
+            <span aria-hidden="true">⇩</span><span>Export CSV</span>
+          </button>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow" id="todayLabel"></p>
+            <h2 id="viewTitle">Dashboard</h2>
+          </div>
+          <div class="top-actions">
+            <div class="search-wrap">
+              <span aria-hidden="true">⌕</span>
+              <input id="searchInput" type="search" placeholder="Search work, notes, client..." />
+            </div>
+            <button class="primary-button" id="quickAddBtn">
+              <span aria-hidden="true">＋</span><span>Add work</span>
+            </button>
+          </div>
+        </header>
+
+        <section class="quick-capture" aria-label="Quick capture">
+          <div class="capture-input">
+            <button class="mic-button" id="voiceBtn" title="Speak a task" aria-label="Speak a task">
+              <span aria-hidden="true">●</span>
+            </button>
+            <input id="quickInput" type="text" placeholder="Try: File GST return every month on 10th due in 3 days high priority" />
+            <button class="secondary-button" id="parseQuickBtn">Capture</button>
+          </div>
+          <div class="chips">
+            <button class="chip" data-template="Call client tomorrow at 10 AM high priority">Call tomorrow</button>
+            <button class="chip" data-template="Review weekly report every Friday">Weekly report</button>
+            <button class="chip" data-template="Pay office rent every month on 5th">Monthly fixed date</button>
+            <button class="chip" data-template="Quarterly compliance review every quarter">Quarterly</button>
+          </div>
+        </section>
+
+        <section id="dashboardView" class="view active-view"></section>
+        <section id="tasksView" class="view"></section>
+        <section id="calendarView" class="view"></section>
+        <section id="boardView" class="view"></section>
+        <section id="reportsView" class="view"></section>
+      </main>
+    </div>
+
+    <dialog id="taskDialog">
+      <form method="dialog" class="task-form" id="taskForm">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">Work details</p>
+            <h3 id="dialogTitle">Add work</h3>
+          </div>
+          <button class="icon-button" value="cancel" formnovalidate title="Close">×</button>
+        </div>
+
+        <input type="hidden" id="taskId" />
+        <div class="form-grid">
+          <label class="full">
+            <span>Title</span>
+            <input id="taskTitle" required maxlength="120" />
+          </label>
+          <label class="full">
+            <span>Description</span>
+            <textarea id="taskDescription" rows="3"></textarea>
+          </label>
+          <label>
+            <span>Category / client</span>
+            <input id="taskCategory" list="categoryList" />
+          </label>
+          <label>
+            <span>Priority</span>
+            <select id="taskPriority">
+              <option>Normal</option>
+              <option>High</option>
+              <option>Urgent</option>
+              <option>Low</option>
+            </select>
+          </label>
+          <label>
+            <span>Status</span>
+            <select id="taskStatus">
+              <option>Pending</option>
+              <option>Going On</option>
+              <option>Waiting</option>
+              <option>Blocked</option>
+              <option>Completed</option>
+              <option>Delayed</option>
+              <option>Cancelled</option>
+            </select>
+          </label>
+          <label>
+            <span>Start date</span>
+            <input id="taskStart" type="date" />
+          </label>
+          <label>
+            <span>Due / last date</span>
+            <input id="taskDue" type="date" />
+          </label>
+          <label>
+            <span>Reminder</span>
+            <select id="taskReminder">
+              <option value="0">On due date</option>
+              <option value="1">1 day before</option>
+              <option value="3">3 days before</option>
+              <option value="7">7 days before</option>
+              <option value="14">14 days before</option>
+            </select>
+          </label>
+          <label>
+            <span>Repeat</span>
+            <select id="taskRepeat">
+              <option value="none">No repeat</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="quarterly">Quarterly</option>
+              <option value="yearly">Yearly</option>
+              <option value="custom">Every N days</option>
+            </select>
+          </label>
+          <label>
+            <span>Every N days</span>
+            <input id="taskRepeatEvery" type="number" min="1" max="365" value="15" />
+          </label>
+          <label>
+            <span>Assigned / owner</span>
+            <input id="taskOwner" />
+          </label>
+          <label class="full">
+            <span>Issue / current note</span>
+            <textarea id="taskIssue" rows="3" placeholder="Example: Waiting for documents, approval, payment, acknowledgment..."></textarea>
+          </label>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="danger-button" id="deleteTaskBtn" type="button">Delete</button>
+          <div class="spacer"></div>
+          <button class="secondary-button" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary-button" id="saveTaskBtn" value="default">Save work</button>
+        </div>
+      </form>
+    </dialog>
+
+    <datalist id="categoryList">
+      <option value="Compliance"></option>
+      <option value="Client"></option>
+      <option value="Finance"></option>
+      <option value="Office"></option>
+      <option value="Personal"></option>
+      <option value="Review"></option>
+    </datalist>
+
+    <template id="emptyTemplate">
+      <div class="empty-state">
+        <strong>No matching work</strong>
+        <span>Add work or change filters to see it here.</span>
+      </div>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
