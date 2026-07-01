@@ -1,6 +1,6 @@
 const STORAGE_KEY = "work-pulse-tasks-v1";
 const SETTINGS_KEY = "work-pulse-settings-v1";
-const API_TASKS_URL = "/api/tasks";
+const API_TASKS_URL = "http://127.0.0.1:8000/api/tasks/";
 
 const statusGroups = ["Pending", "Going On", "Waiting", "Blocked", "Completed", "Delayed", "Cancelled"];
 const boardGroups = ["Pending", "Going On", "Blocked", "Completed"];
@@ -141,77 +141,30 @@ function uid() {
 
 async function loadTasks() {
   try {
-    const response = await fetch(API_TASKS_URL, { cache: "no-store" });
-    if (response.ok) {
-      const remoteTasks = await response.json();
-      if (Array.isArray(remoteTasks)) {
-        state.tasks = remoteTasks;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tasks));
-        return;
-      }
-    }
-  } catch (error) {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      state.tasks = JSON.parse(saved);
-      return;
-    }
-  }
+    const response = await fetch(API_TASKS_URL, {
+      cache: "no-store",
+    });
 
-  state.tasks = [
-    {
-      id: uid(),
-      title: "Review today's pending work",
-      description: "Daily command-center check for priority work, overdue items, and blockers.",
-      category: "Review",
-      priority: "High",
-      status: "Going On",
-      start: todayISO(),
-      due: todayISO(),
-      reminder: 0,
-      repeat: "daily",
-      repeatEvery: 1,
-      owner: "Me",
-      issue: "",
-      notes: [{ at: localTimestamp(), text: "Starter task created." }],
-      createdAt: localTimestamp(),
-      updatedAt: localTimestamp(),
-      completedAt: "",
-    },
-    {
-      id: uid(),
-      title: "Monthly statutory checklist",
-      description: "Check due filings, payments, returns, and acknowledgments.",
-      category: "Compliance",
-      priority: "Urgent",
-      status: "Pending",
-      start: todayISO(),
-      due: addDays(todayISO(), 7),
-      reminder: 3,
-      repeat: "monthly",
-      repeatEvery: 30,
-      owner: "Me",
-      issue: "Confirm source documents before filing.",
-      notes: [{ at: localTimestamp(), text: "Confirm source documents before filing." }],
-      createdAt: localTimestamp(),
-      updatedAt: localTimestamp(),
-      completedAt: "",
-    },
-  ];
-  await saveTasks();
+    if (!response.ok) {
+      throw new Error("Unable to load tasks");
+    }
+
+    const remoteTasks = await response.json();
+
+    state.tasks = Array.isArray(remoteTasks) ? remoteTasks : [];
+
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tasks));
+
+  } catch (error) {
+    console.error("Error loading tasks:", error);
+    state.tasks = [];
+  }
 }
 
 async function saveTasks() {
+  // Temporary - do nothing.
+  // Backend APIs will be called directly by create/update/delete functions.
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tasks));
-  try {
-    await fetch(API_TASKS_URL, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(state.tasks),
-    });
-  } catch (error) {
-    // Local storage keeps the app usable when the server is temporarily unreachable.
-  }
 }
 
 function taskDerived(task) {
