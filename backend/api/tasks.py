@@ -263,6 +263,78 @@ def task_matches(task: Task, text: str) -> bool:
     return all(term in haystack for term in terms[:4]) if terms else False
 
 
+def active_tasks(session: Session) -> list[Task]:
+    return session.exec(
+        select(Task).where(Task.status != "Completed", Task.archived == False).order_by(Task.due_date, Task.priority)  # noqa: E712
+    ).all()
+
+
+def task_contains(task: Task, *terms: str) -> bool:
+    haystack = f"{task.title} {task.description} {task.category} {task.issue} {task.notes}".lower()
+    return any(term.lower() in haystack for term in terms)
+
+
+def build_briefing(session: Session) -> dict:
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    tasks = active_tasks(session)
+    due_today = [task for task in tasks if task.due_date == today]
+    overdue = [task for task in tasks if task.due_date and task.due_date < today]
+    upcoming = [task for task in tasks if task.due_date and today < task.due_date <= today + timedelta(days=7)]
+    meetings = [task for task in tasks if task_contains(task, "meeting", "meet", "bni")]
+    bni_tomorrow = [task for task in tasks if task.due_date == tomorrow and task_contains(task, "bni")]
+    quotations_due = [task for task in due_today if task_contains(task, "quotation", "quote")]
+    priorities = sorted(due_today + overdue, key=lambda item: (item.due_date or today, item.priority != "Urgent", item.priority != "High"))[:6]
+
+    suggestions = []
+    if quotations_due:
+        suggestions.append(f"Finish {quotations_due[0].title} today.")
+    if overdue:
+        suggestions.append(f"Clear {len(overdue)} overdue follow-up(s) before new work.")
+    if bni_tomorrow:
+        suggestions.append("Prepare for tomorrow's BNI item today.")
+    if not suggestions:
+        suggestions.append("No urgent pattern found. Keep today's active list clean.")
+
+    return {
+        "greeting": "Good morning, Gautam.",
+        "date": today.isoformat(),
+        "pending_count": len(tasks),
+        "meeting_count": len(meetings),
+        "bni_tomorrow_count": len(bni_tomorrow),
+        "overdue_count": len(overdue),
+        "due_today_count": len(due_today),
+        "priorities": priorities,
+        "upcoming": upcoming[:6],
+        "suggestions": suggestions,
+        "message": (
+            f"Good morning, Gautam. You have {len(tasks)} pending task(s), "
+            f"{len(meetings)} meeting-related item(s), {len(bni_tomorrow)} BNI item(s) tomorrow, "
+            f"and {len(overdue)} overdue follow-up(s)."
+        ),
+    }
+
+
+def client_context(session: Session, text: str) -> dict | None:
+    clients = session.exec(select(Client).where(Client.active == True).order_by(Client.name)).all()  # noqa: E712
+    client = next((item for item in clients if item.name.lower() in text.lower()), None)
+    if not client:
+        return None
+    tasks = session.exec(
+        select(Task).where(Task.client_id == client.id, Task.archived == False).order_by(Task.due_date)  # noqa: E712
+    ).all()
+    activity = session.exec(
+        select(ActivityLog).where(ActivityLog.entity_type == "client", ActivityLog.entity_id == client.id).order_by(ActivityLog.created_at.desc()).limit(5)
+    ).all()
+    return {
+        "client": client,
+        "pending_tasks": [task for task in tasks if task.status != "Completed"],
+        "completed_tasks": [task for task in tasks if task.status == "Completed"][:5],
+        "activity": activity,
+        "message": f"{client.name}: {len([task for task in tasks if task.status != 'Completed'])} pending task(s). Work scope: {client.work_scope or 'not recorded'}.",
+    }
+
+
 @router.get("/master-data")
 def get_master_data(session: Session = Depends(get_session)):
     return {
@@ -395,6 +467,11 @@ def get_activity(limit: int = 25, session: Session = Depends(get_session)):
     return session.exec(statement).all()
 
 
+@router.get("/briefing")
+def get_briefing(session: Session = Depends(get_session)):
+    return build_briefing(session)
+
+
 @router.post("/tasks")
 def create_task(task_data: TaskCreate, session: Session = Depends(get_session)):
     task = Task(created_at=now(), **normalize_task_data(task_data, session))
@@ -449,8 +526,51 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
     text = command.text.strip()
     lower = text.lower()
 
+    if lower in {"good morning", "morning", "start my day"} or "plan my day" in lower:
+        briefing = build_briefing(session)
+        return {
+            "action": "BRIEFING",
+            "message": f"{briefing['message']} Would you like me to plan your day?",
+            "briefing": briefing,
+        }
+
+    if "prepare me" in lower and "meeting" in lower:
+        briefing = build_briefing(session)
+        meetings = briefing["priorities"] + [task for task in briefing["upcoming"] if task_contains(task, "meeting", "meet", "bni")]
+        return {
+            "action": "MEETING_PREP",
+            "message": f"I found {len(meetings)} meeting-related priority item(s).",
+            "tasks": meetings[:8],
+            "briefing": briefing,
+        }
+
+    if "going to meet" in lower or "meet " in lower:
+        context = client_context(session, lower)
+        if context:
+            return {"action": "CLIENT_CONTEXT", **context}
+        return {"action": "NEEDS_CLARIFICATION", "message": "I could not match that person to a saved client yet."}
+
+    if "today's work is finished" in lower or "todays work is finished" in lower:
+        today = date.today()
+        tomorrow = today + timedelta(days=1)
+        moved = []
+        for task in active_tasks(session):
+            if task.due_date and task.due_date <= today:
+                task.start_date = tomorrow
+                task.due_date = tomorrow
+                task.updated_at = now()
+                session.add(task)
+                moved.append(task)
+        log_activity(session, "PLANNED", "day", f"AI closed the day and moved {len(moved)} unfinished task(s) to tomorrow")
+        session.commit()
+        return {
+            "action": "DAY_CLOSED",
+            "message": f"Day closed. I moved {len(moved)} unfinished task(s) to tomorrow and wrote the activity log.",
+            "tasks": moved,
+        }
+
     if any(phrase in lower for phrase in ("show pending", "pending tasks", "what work is pending", "what is pending")):
-        tasks = session.exec(select(Task).where(Task.status != "Completed", Task.archived == False).order_by(Task.due_date)).all()  # noqa: E712
+        tasks = active_tasks(session)
         return {
             "action": "ANSWER",
             "message": f"{len(tasks)} pending task(s).",

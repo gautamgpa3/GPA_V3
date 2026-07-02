@@ -528,6 +528,35 @@ button {
   grid-template-columns: repeat(2, minmax(260px, 1fr));
 }
 
+.briefing-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.briefing-list div {
+  background: #f8faf9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.briefing-list strong,
+.briefing-list span {
+  display: block;
+}
+
+.briefing-list strong {
+  font-size: 24px;
+}
+
+.briefing-list span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .client-card {
   background: var(--panel);
   border: 1px solid var(--line);
@@ -793,6 +822,10 @@ textarea {
 
   .client-grid {
     grid-template-columns: 1fr;
+  }
+
+  .briefing-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   dialog {

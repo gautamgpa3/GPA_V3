@@ -3,6 +3,7 @@ const API_MASTER_DATA_URL = "/api/master-data";
 const API_CLIENTS_URL = "/api/clients";
 const API_ACTIVITY_URL = "/api/activity";
 const API_ASSISTANT_URL = "/api/assistant/command";
+const API_BRIEFING_URL = "/api/briefing";
 const SETTINGS_KEY = "gpa-v3-settings";
 const LOCAL_TIME_ZONE = "Asia/Kolkata";
 
@@ -10,6 +11,7 @@ const state = {
   tasks: [],
   clients: [],
   activity: [],
+  briefing: null,
   conversation: [],
   master: {
     categories: [],
@@ -226,6 +228,10 @@ async function loadActivity() {
   state.activity = Array.isArray(activity) ? activity : [];
 }
 
+async function loadBriefing() {
+  state.briefing = await api(API_BRIEFING_URL);
+}
+
 function optionTags(values, selected = "") {
   return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
 }
@@ -370,6 +376,7 @@ function getStats() {
 
 function renderDashboard() {
   const stats = getStats();
+  const briefing = state.briefing;
   const active = state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
   const today = active.filter((task) => taskDerived(task).activeToday);
   const overdue = active.filter((task) => taskDerived(task).overdue);
@@ -385,6 +392,15 @@ function renderDashboard() {
       <div class="metric"><span>Blocked / issue</span><strong>${stats.blocked}</strong></div>
     </div>
     <div class="content-grid">
+      <div class="panel">
+        <div class="panel-head"><h3>Good Morning Gautam</h3><span class="mini">${briefing?.date || todayISO()}</span></div>
+        <div class="briefing-list">
+          <div><strong>${briefing?.pending_count ?? stats.active}</strong><span>Pending tasks</span></div>
+          <div><strong>${briefing?.meeting_count ?? 0}</strong><span>Meetings</span></div>
+          <div><strong>${briefing?.bni_tomorrow_count ?? 0}</strong><span>BNI tomorrow</span></div>
+          <div><strong>${briefing?.overdue_count ?? stats.overdue}</strong><span>Overdue</span></div>
+        </div>
+      </div>
       <div class="panel">
         <div class="panel-head"><h3>Today's pending work</h3><span class="mini">${today.length} active items</span></div>
         ${renderTaskList(today, "No pending work for today")}
@@ -406,8 +422,12 @@ function renderDashboard() {
         ${renderTaskList(active.filter((task) => task.repeat_type && task.repeat_type !== "None").slice(0, 8), "No recurring work yet")}
       </div>
       <div class="panel">
-        <div class="panel-head"><h3>AI suggestions</h3><span class="mini">Offline assistant</span></div>
-        <div class="task-note">Ask: show pending tasks, complete the first task, or remind me to call Kalpesh tomorrow.</div>
+        <div class="panel-head"><h3>AI suggestions</h3><span class="mini">From your data</span></div>
+        <div class="task-list">
+          ${(briefing?.suggestions || ["Ask: good morning, prepare me for today's meetings, or I'm going to meet Kalpesh."])
+            .map((suggestion) => `<div class="task-note">${escapeHtml(suggestion)}</div>`)
+            .join("")}
+        </div>
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Recent activity</h3><span class="mini">${state.activity.length} latest</span></div>
@@ -579,6 +599,22 @@ function renderSettings() {
       ${masterList("Assigned to / staff", "owners", state.master.owner_items || [])}
     </div>
   `;
+}
+
+function assistantResponseText(response) {
+  if (response.action === "BRIEFING" && response.briefing) {
+    const priorities = (response.briefing.priorities || []).map((task) => task.title).slice(0, 4).join(", ");
+    return `${response.message}${priorities ? ` Priorities: ${priorities}.` : ""}`;
+  }
+  if (response.action === "CLIENT_CONTEXT" && response.client) {
+    const pending = (response.pending_tasks || []).map((task) => task.title).slice(0, 4).join(", ");
+    return `${response.message}${pending ? ` Pending: ${pending}.` : ""}`;
+  }
+  if (response.action === "MEETING_PREP") {
+    const tasks = (response.tasks || []).map((task) => task.title).slice(0, 5).join(", ");
+    return `${response.message}${tasks ? ` Prepare for: ${tasks}.` : ""}`;
+  }
+  return response.message || "Done.";
 }
 
 function render() {
@@ -832,9 +868,10 @@ async function runAssistantCommand(text) {
     body: JSON.stringify({ text }),
   });
   state.conversation.push({ role: "You", text });
-  state.conversation.push({ role: "GPA", text: response.message || "Done." });
+  state.conversation.push({ role: "GPA", text: assistantResponseText(response) });
   await loadTasks();
   await loadActivity();
+  await loadBriefing();
   render();
   return response;
 }
@@ -989,6 +1026,7 @@ async function init() {
     populateMasterControls();
     await loadTasks();
     await loadActivity();
+    await loadBriefing();
     bindEvents();
     setupVoice();
     render();
