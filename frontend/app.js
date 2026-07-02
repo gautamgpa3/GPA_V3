@@ -1,14 +1,17 @@
-const STORAGE_KEY = "work-pulse-tasks-v1";
-const SETTINGS_KEY = "work-pulse-settings-v1";
 const API_TASKS_URL = "/api/tasks";
-
-const statusGroups = ["Pending", "Going On", "Waiting", "Blocked", "Completed", "Delayed", "Cancelled"];
-const boardGroups = ["Pending", "Going On", "Blocked", "Completed"];
-const priorityWeight = { Urgent: 4, High: 3, Normal: 2, Low: 1 };
+const API_MASTER_DATA_URL = "/api/master-data";
+const SETTINGS_KEY = "gpa-v3-settings";
 const LOCAL_TIME_ZONE = "Asia/Kolkata";
 
 const state = {
   tasks: [],
+  master: {
+    categories: [],
+    priorities: [],
+    statuses: [],
+    owners: [],
+    repeat_types: [],
+  },
   currentView: "dashboard",
   filters: {
     status: "All",
@@ -41,6 +44,8 @@ const els = {
   form: document.querySelector("#taskForm"),
   dialogTitle: document.querySelector("#dialogTitle"),
   deleteTaskBtn: document.querySelector("#deleteTaskBtn"),
+  categoryList: document.querySelector("#categoryList"),
+  ownerList: document.querySelector("#ownerList"),
   fields: {
     id: document.querySelector("#taskId"),
     title: document.querySelector("#taskTitle"),
@@ -48,13 +53,14 @@ const els = {
     category: document.querySelector("#taskCategory"),
     priority: document.querySelector("#taskPriority"),
     status: document.querySelector("#taskStatus"),
-    start: document.querySelector("#taskStart"),
-    due: document.querySelector("#taskDue"),
+    start_date: document.querySelector("#taskStart"),
+    due_date: document.querySelector("#taskDue"),
     reminder: document.querySelector("#taskReminder"),
-    repeat: document.querySelector("#taskRepeat"),
-    repeatEvery: document.querySelector("#taskRepeatEvery"),
+    repeat_type: document.querySelector("#taskRepeat"),
+    repeat_every: document.querySelector("#taskRepeatEvery"),
     owner: document.querySelector("#taskOwner"),
     issue: document.querySelector("#taskIssue"),
+    notes: document.querySelector("#taskNotes"),
   },
   emptyTemplate: document.querySelector("#emptyTemplate"),
 };
@@ -65,7 +71,9 @@ function todayISO() {
 
 function toDate(value) {
   if (!value) return null;
-  const [year, month, day] = value.split("-").map(Number);
+  const iso = String(value).slice(0, 10);
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return null;
   return new Date(year, month - 1, day);
 }
 
@@ -83,30 +91,11 @@ function dateISO(date) {
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
-function localTimestamp(date = new Date()) {
-  const parts = Object.fromEntries(
-    new Intl.DateTimeFormat("en-GB", {
-      timeZone: LOCAL_TIME_ZONE,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hour12: false,
-    })
-      .formatToParts(date)
-      .map((part) => [part.type, part.value])
-  );
-  return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}:${parts.second} IST`;
-}
-
-function formatLocalTimestamp(value) {
-  if (!value) return "";
-  if (String(value).endsWith("IST")) return value;
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return value;
-  return localTimestamp(parsed);
+function diffDays(a, b = todayISO()) {
+  const first = toDate(a);
+  const second = toDate(b);
+  if (!first || !second) return 0;
+  return Math.round((first - second) / 86400000);
 }
 
 function addDays(iso, days) {
@@ -115,116 +104,109 @@ function addDays(iso, days) {
   return dateISO(date);
 }
 
-function addMonths(iso, months) {
-  const date = toDate(iso || todayISO());
-  const originalDay = date.getDate();
-  date.setMonth(date.getMonth() + months);
-  if (date.getDate() !== originalDay) date.setDate(0);
-  return dateISO(date);
-}
-
-function diffDays(a, b = todayISO()) {
-  const first = toDate(a);
-  const second = toDate(b);
-  if (!first || !second) return 0;
-  return Math.round((first - second) / 86400000);
-}
-
 function formatDate(iso) {
-  if (!iso) return "No date";
-  return toDate(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  const date = toDate(iso);
+  if (!date) return "No date";
+  return date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function uid() {
-  return `task-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+function formatTimestamp(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: LOCAL_TIME_ZONE,
+  });
+}
+
+function escapeHtml(value = "") {
+  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
+}
+
+function priorityWeight(priority) {
+  const priorities = state.master.priorities.length ? state.master.priorities : ["Urgent", "High", "Normal", "Low"];
+  const index = priorities.indexOf(priority);
+  return index === -1 ? 0 : priorities.length - index;
+}
+
+function activeStatuses() {
+  return state.master.statuses.filter((status) => !["Completed", "Cancelled"].includes(status));
+}
+
+function boardGroups() {
+  return activeStatuses().filter((status) => ["Pending", "Going On", "Waiting", "Blocked"].includes(status)).slice(0, 4);
+}
+
+function normalizeTask(task) {
+  return {
+    id: task.id,
+    title: task.title || "",
+    description: task.description || "",
+    category: task.category || "General",
+    priority: task.priority || "Normal",
+    status: task.status || "Pending",
+    start_date: task.start_date || todayISO(),
+    due_date: task.due_date || "",
+    reminder: Boolean(task.reminder),
+    repeat_type: task.repeat_type || "None",
+    repeat_every: Number(task.repeat_every || 1),
+    owner: task.owner || "Me",
+    issue: task.issue || "",
+    notes: task.notes || "",
+    created_at: task.created_at || "",
+    updated_at: task.updated_at || "",
+    completed_at: task.completed_at || "",
+    archived: Boolean(task.archived),
+  };
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, {
+    cache: "no-store",
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...options,
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Request failed: ${response.status}`);
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+async function loadMasterData() {
+  state.master = await api(API_MASTER_DATA_URL);
+  populateMasterControls();
 }
 
 async function loadTasks() {
-  try {
-    const response = await fetch(API_TASKS_URL, { cache: "no-store" });
-    if (response.ok) {
-      const remoteTasks = await response.json();
-      if (Array.isArray(remoteTasks)) {
-        state.tasks = remoteTasks;
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tasks));
-        return;
-      }
-    }
-  } catch (error) {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      state.tasks = JSON.parse(saved);
-      return;
-    }
-  }
-
-  state.tasks = [
-    {
-      id: uid(),
-      title: "Review today's pending work",
-      description: "Daily command-center check for priority work, overdue items, and blockers.",
-      category: "Review",
-      priority: "High",
-      status: "Going On",
-      start: todayISO(),
-      due: todayISO(),
-      reminder: 0,
-      repeat: "daily",
-      repeatEvery: 1,
-      owner: "Me",
-      issue: "",
-      notes: [{ at: localTimestamp(), text: "Starter task created." }],
-      createdAt: localTimestamp(),
-      updatedAt: localTimestamp(),
-      completedAt: "",
-    },
-    {
-      id: uid(),
-      title: "Monthly statutory checklist",
-      description: "Check due filings, payments, returns, and acknowledgments.",
-      category: "Compliance",
-      priority: "Urgent",
-      status: "Pending",
-      start: todayISO(),
-      due: addDays(todayISO(), 7),
-      reminder: 3,
-      repeat: "monthly",
-      repeatEvery: 30,
-      owner: "Me",
-      issue: "Confirm source documents before filing.",
-      notes: [{ at: localTimestamp(), text: "Confirm source documents before filing." }],
-      createdAt: localTimestamp(),
-      updatedAt: localTimestamp(),
-      completedAt: "",
-    },
-  ];
-  await saveTasks();
+  const tasks = await api(API_TASKS_URL);
+  state.tasks = Array.isArray(tasks) ? tasks.map(normalizeTask) : [];
 }
 
-async function saveTasks() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.tasks));
-  try {
-    await fetch(API_TASKS_URL, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(state.tasks),
-    });
-  } catch (error) {
-    // Local storage keeps the app usable when the server is temporarily unreachable.
-  }
+function optionTags(values, selected = "") {
+  return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
+}
+
+function populateMasterControls() {
+  els.fields.priority.innerHTML = optionTags(state.master.priorities);
+  els.fields.status.innerHTML = optionTags(state.master.statuses);
+  els.fields.repeat_type.innerHTML = optionTags(state.master.repeat_types);
+  els.categoryList.innerHTML = state.master.categories.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+  els.ownerList.innerHTML = state.master.owners.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
 }
 
 function taskDerived(task) {
-  const daysLeft = diffDays(task.due);
-  const age = Math.max(0, -diffDays(task.start || todayISO()));
-  const isDone = task.status === "Completed" || task.status === "Cancelled";
-  const hasStarted = diffDays(task.start || todayISO()) <= 0;
-  const activeToday = hasStarted && !isDone;
-  const overdue = task.due && daysLeft < 0 && !isDone;
-  const dueSoon = task.due && daysLeft >= 0 && daysLeft <= 3 && !isDone;
-  const reminderDue = task.due && daysLeft <= Number(task.reminder || 0) && !isDone;
-  const attention = activeToday && (overdue || reminderDue || task.priority === "Urgent" || task.status === "Blocked" || task.issue);
-  return { daysLeft, age, hasStarted, activeToday, overdue, dueSoon, reminderDue, attention, isDone };
+  const daysLeft = diffDays(task.due_date);
+  const age = Math.max(0, -diffDays(task.start_date || todayISO()));
+  const isDone = ["Completed", "Cancelled"].includes(task.status);
+  const hasStarted = diffDays(task.start_date || todayISO()) <= 0;
+  const activeToday = hasStarted && !isDone && !task.archived;
+  const overdue = Boolean(task.due_date && daysLeft < 0 && !isDone);
+  const dueSoon = Boolean(task.due_date && daysLeft >= 0 && daysLeft <= 3 && !isDone);
+  const attention = activeToday && (overdue || task.priority === "Urgent" || task.status === "Blocked" || task.issue);
+  return { daysLeft, age, hasStarted, activeToday, overdue, dueSoon, attention, isDone };
 }
 
 function filteredTasks() {
@@ -234,68 +216,42 @@ function filteredTasks() {
       if (state.filters.status !== "All" && task.status !== state.filters.status) return false;
       if (state.filters.priority !== "All" && task.priority !== state.filters.priority) return false;
       if (state.filters.repeat !== "All") {
-        const isRecurring = task.repeat && task.repeat !== "none";
+        const isRecurring = task.repeat_type && task.repeat_type !== "None";
         if (state.filters.repeat === "Recurring" && !isRecurring) return false;
         if (state.filters.repeat === "One-time" && isRecurring) return false;
       }
       if (state.filters.horizon !== "All") {
-        const d = taskDerived(task);
-        if (state.filters.horizon === "Today" && !d.activeToday) return false;
-        if (state.filters.horizon === "Overdue" && !d.overdue) return false;
-        if (state.filters.horizon === "This week" && (diffDays(task.due) < 0 || diffDays(task.due) > 7)) return false;
+        const derived = taskDerived(task);
+        if (state.filters.horizon === "Today" && !derived.activeToday) return false;
+        if (state.filters.horizon === "Overdue" && !derived.overdue) return false;
+        if (state.filters.horizon === "This week" && (diffDays(task.due_date) < 0 || diffDays(task.due_date) > 7)) return false;
       }
       if (!q) return true;
-      return [task.title, task.description, task.category, task.owner, task.issue, ...(task.notes || []).map((n) => n.text)]
-        .join(" ")
-        .toLowerCase()
-        .includes(q);
+      return [task.title, task.description, task.category, task.owner, task.issue, task.notes].join(" ").toLowerCase().includes(q);
     })
     .sort((a, b) => {
       const ad = taskDerived(a);
       const bd = taskDerived(b);
       if (ad.isDone !== bd.isDone) return ad.isDone ? 1 : -1;
       if (ad.overdue !== bd.overdue) return ad.overdue ? -1 : 1;
-      if (ad.reminderDue !== bd.reminderDue) return ad.reminderDue ? -1 : 1;
       if (ad.attention !== bd.attention) return ad.attention ? -1 : 1;
-      if (priorityWeight[a.priority] !== priorityWeight[b.priority]) return priorityWeight[b.priority] - priorityWeight[a.priority];
-      if ((a.due || "") !== (b.due || "")) return (a.due || "9999").localeCompare(b.due || "9999");
-      return (a.title || "").localeCompare(b.title || "");
+      if (priorityWeight(a.priority) !== priorityWeight(b.priority)) return priorityWeight(b.priority) - priorityWeight(a.priority);
+      return (a.due_date || "9999").localeCompare(b.due_date || "9999");
     });
 }
 
-function nextDueDate(task) {
-  if (!task.due) return "";
-  if (task.repeat === "daily") return addDays(task.due, 1);
-  if (task.repeat === "weekly") return addDays(task.due, 7);
-  if (task.repeat === "monthly") return addMonths(task.due, 1);
-  if (task.repeat === "quarterly") return addMonths(task.due, 3);
-  if (task.repeat === "yearly") return addMonths(task.due, 12);
-  if (task.repeat === "custom") return addDays(task.due, Number(task.repeatEvery || 1));
-  return "";
-}
-
-function completeTask(task) {
+async function completeTask(task) {
   if (!window.confirm(`Mark "${task.title}" as completed?`)) return;
-  const updated = { ...task, status: "Completed", completedAt: localTimestamp(), updatedAt: localTimestamp() };
-  const index = state.tasks.findIndex((item) => item.id === task.id);
-  state.tasks[index] = updated;
+  await api(`${API_TASKS_URL}/${task.id}/complete`, { method: "PUT" });
+  await loadTasks();
+  render();
+}
 
-  const nextDue = nextDueDate(updated);
-  if (nextDue) {
-    state.tasks.push({
-      ...updated,
-      id: uid(),
-      status: "Pending",
-      start: nextDue,
-      due: nextDue,
-      issue: "",
-      notes: [{ at: localTimestamp(), text: `Auto-created from recurring work after ${formatDate(task.due)} was completed.` }],
-      createdAt: localTimestamp(),
-      updatedAt: localTimestamp(),
-      completedAt: "",
-    });
-  }
-  saveTasks();
+async function deleteTask(task) {
+  if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+  await api(`${API_TASKS_URL}/${task.id}`, { method: "DELETE" });
+  await loadTasks();
+  els.dialog.close();
   render();
 }
 
@@ -303,34 +259,28 @@ function createBadge(text, color = "green") {
   return `<span class="badge ${color}">${escapeHtml(text)}</span>`;
 }
 
-function escapeHtml(value = "") {
-  return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
-}
-
 function taskCard(task) {
   const d = taskDerived(task);
   const classes = ["task-card"];
   if (d.overdue) classes.push("overdue");
   if (d.dueSoon) classes.push("due-soon");
-  if (d.reminderDue) classes.push("reminder-due");
   if (d.isDone) classes.push("completed");
-  const dayText = d.overdue ? `${Math.abs(d.daysLeft)} days overdue` : d.daysLeft === 0 ? "Due today" : `${d.daysLeft} days left`;
-  const repeatText = task.repeat && task.repeat !== "none" ? task.repeat === "custom" ? `Every ${task.repeatEvery} days` : task.repeat : "One-time";
-  const reminderText = d.reminderDue ? "Reminder priority" : `${task.reminder || 0} day reminder`;
+  const dayText = d.overdue ? `${Math.abs(d.daysLeft)} days overdue` : d.daysLeft === 0 ? "Due today" : task.due_date ? `${d.daysLeft} days left` : "No due date";
+  const repeatText = task.repeat_type === "None" ? "One-time" : task.repeat_type === "Custom Days" ? `Every ${task.repeat_every} days` : task.repeat_type;
   return `
     <article class="${classes.join(" ")}" data-id="${task.id}">
       <div class="task-row">
         <div>
           <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(task.title)}</button>
-          <div class="task-meta">${escapeHtml(task.category || "General")} · ${formatDate(task.due)} · Active ${d.age} days</div>
+          <div class="task-meta">${escapeHtml(task.category)} - ${formatDate(task.due_date)} - Active ${d.age} days</div>
         </div>
-        <button class="icon-button" data-action="complete" data-id="${task.id}" title="Mark complete">✓</button>
+        ${d.isDone ? "" : `<button class="icon-button" data-action="complete" data-id="${task.id}" title="Mark complete">OK</button>`}
       </div>
       <div class="badges">
         ${createBadge(task.status, task.status === "Blocked" || task.status === "Delayed" ? "red" : task.status === "Waiting" ? "amber" : "green")}
         ${createBadge(task.priority, task.priority === "Urgent" || task.priority === "High" ? "red" : "blue")}
         ${createBadge(dayText, d.overdue ? "red" : d.dueSoon ? "amber" : "blue")}
-        ${createBadge(reminderText, d.reminderDue ? "red" : "blue")}
+        ${task.reminder ? createBadge("Daily visible from start", "blue") : ""}
         ${createBadge(repeatText, "green")}
       </div>
       ${task.issue ? `<div class="task-note">${escapeHtml(task.issue)}</div>` : ""}
@@ -350,40 +300,31 @@ function renderTaskList(tasks, emptyText = "No matching work") {
 }
 
 function getStats() {
-  const active = state.tasks.filter((t) => !taskDerived(t).isDone);
+  const active = state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
   return {
     total: state.tasks.length,
     active: active.length,
-    today: active.filter((t) => taskDerived(t).activeToday).length,
-    dueToday: active.filter((t) => diffDays(t.due) === 0).length,
-    reminders: active.filter((t) => taskDerived(t).reminderDue).length,
-    overdue: active.filter((t) => taskDerived(t).overdue).length,
-    blocked: active.filter((t) => t.status === "Blocked" || t.issue).length,
-    completed: state.tasks.filter((t) => t.status === "Completed").length,
-    recurring: state.tasks.filter((t) => t.repeat && t.repeat !== "none").length,
+    today: active.filter((task) => taskDerived(task).activeToday).length,
+    dueToday: active.filter((task) => diffDays(task.due_date) === 0).length,
+    overdue: active.filter((task) => taskDerived(task).overdue).length,
+    blocked: active.filter((task) => task.status === "Blocked" || task.issue).length,
+    completed: state.tasks.filter((task) => task.status === "Completed").length,
+    recurring: state.tasks.filter((task) => task.repeat_type && task.repeat_type !== "None").length,
   };
 }
 
 function renderDashboard() {
   const stats = getStats();
-  const active = state.tasks.filter((t) => !taskDerived(t).isDone);
-  const today = active.filter((t) => taskDerived(t).activeToday).sort((a, b) => {
-    const ad = taskDerived(a);
-    const bd = taskDerived(b);
-    if (ad.overdue !== bd.overdue) return ad.overdue ? -1 : 1;
-    if (ad.reminderDue !== bd.reminderDue) return ad.reminderDue ? -1 : 1;
-    if (priorityWeight[a.priority] !== priorityWeight[b.priority]) return priorityWeight[b.priority] - priorityWeight[a.priority];
-    return (a.due || "9999").localeCompare(b.due || "9999");
-  });
-  const overdue = active.filter((t) => taskDerived(t).overdue);
-  const reminders = active.filter((t) => taskDerived(t).reminderDue);
-  const soon = active.filter((t) => diffDays(t.due) > 0 && diffDays(t.due) <= 7 && !taskDerived(t).activeToday);
-  const blocked = active.filter((t) => t.status === "Blocked" || t.issue);
+  const active = state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
+  const today = active.filter((task) => taskDerived(task).activeToday);
+  const overdue = active.filter((task) => taskDerived(task).overdue);
+  const soon = active.filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !taskDerived(task).activeToday);
+  const blocked = active.filter((task) => task.status === "Blocked" || task.issue);
 
   els.views.dashboard.innerHTML = `
     <div class="metric-grid">
       <div class="metric"><span>Today's pending</span><strong>${stats.today}</strong></div>
-      <div class="metric"><span>Reminder priority</span><strong>${stats.reminders}</strong></div>
+      <div class="metric"><span>Due today</span><strong>${stats.dueToday}</strong></div>
       <div class="metric"><span>Overdue</span><strong>${stats.overdue}</strong></div>
       <div class="metric"><span>Active</span><strong>${stats.active}</strong></div>
       <div class="metric"><span>Blocked / issue</span><strong>${stats.blocked}</strong></div>
@@ -394,8 +335,8 @@ function renderDashboard() {
         ${renderTaskList(today, "No pending work for today")}
       </div>
       <div class="panel">
-        <div class="panel-head"><h3>Reminder priority</h3><span class="mini">${reminders.length} alerts</span></div>
-        ${renderTaskList(reminders, "No reminder alerts today")}
+        <div class="panel-head"><h3>Overdue work</h3><span class="mini">${overdue.length} overdue</span></div>
+        ${renderTaskList(overdue, "No overdue work")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Next 7 days</h3><span class="mini">${soon.length} upcoming</span></div>
@@ -407,7 +348,7 @@ function renderDashboard() {
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Recurring work</h3><span class="mini">${stats.recurring} scheduled</span></div>
-        ${renderTaskList(active.filter((t) => t.repeat && t.repeat !== "none").slice(0, 8), "No recurring work yet")}
+        ${renderTaskList(active.filter((task) => task.repeat_type && task.repeat_type !== "None").slice(0, 8), "No recurring work yet")}
       </div>
     </div>
   `;
@@ -417,10 +358,10 @@ function renderTasks() {
   const tasks = filteredTasks();
   els.views.tasks.innerHTML = `
     <div class="filters">
-      <select data-filter="status">${["All", ...statusGroups].map((s) => `<option ${state.filters.status === s ? "selected" : ""}>${s}</option>`).join("")}</select>
-      <select data-filter="priority">${["All", "Urgent", "High", "Normal", "Low"].map((s) => `<option ${state.filters.priority === s ? "selected" : ""}>${s}</option>`).join("")}</select>
-      <select data-filter="repeat">${["All", "Recurring", "One-time"].map((s) => `<option ${state.filters.repeat === s ? "selected" : ""}>${s}</option>`).join("")}</select>
-      <select data-filter="horizon">${["All", "Today", "This week", "Overdue"].map((s) => `<option ${state.filters.horizon === s ? "selected" : ""}>${s}</option>`).join("")}</select>
+      <select data-filter="status">${optionTags(["All", ...state.master.statuses], state.filters.status)}</select>
+      <select data-filter="priority">${optionTags(["All", ...state.master.priorities], state.filters.priority)}</select>
+      <select data-filter="repeat">${optionTags(["All", "Recurring", "One-time"], state.filters.repeat)}</select>
+      <select data-filter="horizon">${optionTags(["All", "Today", "This week", "Overdue"], state.filters.horizon)}</select>
     </div>
     ${renderTaskList(tasks)}
   `;
@@ -429,19 +370,18 @@ function renderTasks() {
 function renderCalendar() {
   const base = new Date();
   const start = new Date(base.getFullYear(), base.getMonth(), 1);
-  const firstOffset = start.getDay();
   const gridStart = new Date(start);
-  gridStart.setDate(start.getDate() - firstOffset);
+  gridStart.setDate(start.getDate() - start.getDay());
   const cells = [];
-  for (let i = 0; i < 42; i += 1) {
+  for (let index = 0; index < 42; index += 1) {
     const date = new Date(gridStart);
-    date.setDate(gridStart.getDate() + i);
+    date.setDate(gridStart.getDate() + index);
     const iso = dateISO(date);
-    const tasks = state.tasks.filter((t) => t.due === iso);
+    const tasks = state.tasks.filter((task) => task.due_date === iso);
     cells.push(`
       <div class="day-cell ${iso === todayISO() ? "today" : ""}">
         <div class="day-num">${date.toLocaleDateString(undefined, { weekday: "short", day: "2-digit" })}</div>
-        ${tasks.map((t) => `<button class="day-task" data-action="edit" data-id="${t.id}" title="${escapeHtml(t.title)}">${escapeHtml(t.title)}</button>`).join("")}
+        ${tasks.map((task) => `<button class="day-task" data-action="edit" data-id="${task.id}" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</button>`).join("")}
       </div>
     `);
   }
@@ -458,65 +398,36 @@ function renderCalendar() {
 
 function renderBoard() {
   const active = filteredTasks();
-  els.views.board.innerHTML = `<div class="board-grid">${boardGroups
+  const groups = boardGroups();
+  els.views.board.innerHTML = `<div class="board-grid">${groups
     .map((group) => {
-      const tasks = active.filter((task) => {
-        if (group === "Blocked") return task.status === "Blocked" || task.status === "Waiting" || task.issue;
-        return task.status === group;
-      });
-      return `<div class="board-column"><h3>${group} · ${tasks.length}</h3>${renderTaskList(tasks, `No ${group.toLowerCase()} work`)}</div>`;
+      const tasks = active.filter((task) => task.status === group || (group === "Blocked" && task.issue));
+      return `<div class="board-column"><h3>${escapeHtml(group)} - ${tasks.length}</h3>${renderTaskList(tasks, `No ${group.toLowerCase()} work`)}</div>`;
     })
     .join("")}</div>`;
 }
 
 function reportLine(label, value, total) {
   const pct = total ? Math.round((value / total) * 100) : 0;
-  return `<div><div class="task-row"><span>${label}</span><strong>${value}</strong></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
+  return `<div><div class="task-row"><span>${escapeHtml(label)}</span><strong>${value}</strong></div><div class="bar"><span style="width:${pct}%"></span></div></div>`;
 }
 
 function renderReports() {
   const stats = getStats();
-  const active = state.tasks.filter((t) => !taskDerived(t).isDone);
-  const byStatus = statusGroups.map((s) => [s, state.tasks.filter((t) => t.status === s).length]);
-  const byPriority = ["Urgent", "High", "Normal", "Low"].map((p) => [p, state.tasks.filter((t) => t.priority === p).length]);
-  const byCategory = [...new Set(state.tasks.map((t) => t.category || "General"))].map((c) => [c, state.tasks.filter((t) => (t.category || "General") === c).length]);
-  const aging = active
-    .map((t) => ({ task: t, age: taskDerived(t).age }))
-    .sort((a, b) => b.age - a.age)
-    .slice(0, 6);
+  const active = state.tasks.filter((task) => !taskDerived(task).isDone);
+  const byStatus = state.master.statuses.map((status) => [status, state.tasks.filter((task) => task.status === status).length]);
+  const byPriority = state.master.priorities.map((priority) => [priority, state.tasks.filter((task) => task.priority === priority).length]);
+  const byCategory = [...new Set(state.tasks.map((task) => task.category || "General"))].map((category) => [category, state.tasks.filter((task) => (task.category || "General") === category).length]);
+  const aging = active.map((task) => ({ task, age: taskDerived(task).age })).sort((a, b) => b.age - a.age).slice(0, 6);
 
   els.views.reports.innerHTML = `
     <div class="report-grid">
-      <div class="report-card">
-        <h3>Status report</h3>
-        ${byStatus.map(([label, value]) => reportLine(label, value, stats.total)).join("")}
-      </div>
-      <div class="report-card">
-        <h3>Priority report</h3>
-        ${byPriority.map(([label, value]) => reportLine(label, value, stats.total)).join("")}
-      </div>
-      <div class="report-card">
-        <h3>Category report</h3>
-        ${byCategory.map(([label, value]) => reportLine(label, value, stats.total)).join("")}
-      </div>
-      <div class="report-card">
-        <h3>Aging report</h3>
-        ${aging.length ? aging.map(({ task, age }) => `<p class="task-meta"><strong>${escapeHtml(task.title)}</strong><br>${age} active days · due ${formatDate(task.due)}</p>`).join("") : "<p class='task-meta'>No active aging yet.</p>"}
-      </div>
-      <div class="report-card">
-        <h3>Alert report</h3>
-        ${reportLine("Today's pending", stats.today, Math.max(stats.active, 1))}
-        ${reportLine("Due today", stats.dueToday, Math.max(stats.active, 1))}
-        ${reportLine("Reminder priority", stats.reminders, Math.max(stats.active, 1))}
-        ${reportLine("Overdue", stats.overdue, Math.max(stats.active, 1))}
-        ${reportLine("Blocked / issue", stats.blocked, Math.max(stats.active, 1))}
-      </div>
-      <div class="report-card">
-        <h3>Completion report</h3>
-        ${reportLine("Completed", stats.completed, Math.max(stats.total, 1))}
-        ${reportLine("Active", stats.active, Math.max(stats.total, 1))}
-        ${reportLine("Recurring", stats.recurring, Math.max(stats.total, 1))}
-      </div>
+      <div class="report-card"><h3>Status report</h3>${byStatus.map(([label, value]) => reportLine(label, value, stats.total)).join("")}</div>
+      <div class="report-card"><h3>Priority report</h3>${byPriority.map(([label, value]) => reportLine(label, value, stats.total)).join("")}</div>
+      <div class="report-card"><h3>Category report</h3>${byCategory.map(([label, value]) => reportLine(label, value, stats.total)).join("")}</div>
+      <div class="report-card"><h3>Aging report</h3>${aging.length ? aging.map(({ task, age }) => `<p class="task-meta"><strong>${escapeHtml(task.title)}</strong><br>${age} active days - due ${formatDate(task.due_date)}</p>`).join("") : "<p class='task-meta'>No active aging yet.</p>"}</div>
+      <div class="report-card"><h3>Alert report</h3>${reportLine("Today's pending", stats.today, Math.max(stats.active, 1))}${reportLine("Due today", stats.dueToday, Math.max(stats.active, 1))}${reportLine("Overdue", stats.overdue, Math.max(stats.active, 1))}${reportLine("Blocked / issue", stats.blocked, Math.max(stats.active, 1))}</div>
+      <div class="report-card"><h3>Completion report</h3>${reportLine("Completed", stats.completed, Math.max(stats.total, 1))}${reportLine("Active", stats.active, Math.max(stats.total, 1))}${reportLine("Recurring", stats.recurring, Math.max(stats.total, 1))}</div>
     </div>
   `;
 }
@@ -536,65 +447,62 @@ function render() {
 
 function openTaskDialog(task = null) {
   els.form.reset();
+  populateMasterControls();
   els.deleteTaskBtn.hidden = !task;
   els.dialogTitle.textContent = task ? "Edit work" : "Add work";
   const defaults = {
     id: "",
     title: "",
     description: "",
-    category: "",
-    priority: "Normal",
-    status: "Pending",
-    start: todayISO(),
-    due: todayISO(),
-    reminder: 1,
-    repeat: "none",
-    repeatEvery: 15,
-    owner: "Me",
+    category: "General",
+    priority: state.master.priorities[0] || "Normal",
+    status: state.master.statuses[0] || "Pending",
+    start_date: todayISO(),
+    due_date: "",
+    reminder: true,
+    repeat_type: "None",
+    repeat_every: 1,
+    owner: state.master.owners[0] || "Me",
     issue: "",
+    notes: "",
   };
   const data = { ...defaults, ...(task || {}) };
   Object.entries(els.fields).forEach(([key, field]) => {
-    field.value = data[key] ?? "";
+    if (field.type === "checkbox") field.checked = Boolean(data[key]);
+    else field.value = data[key] ?? "";
   });
   els.dialog.showModal();
 }
 
 function readForm() {
-  const existing = state.tasks.find((task) => task.id === els.fields.id.value);
-  const issue = els.fields.issue.value.trim();
-  const notes = [...(existing?.notes || [])];
-  if (issue && issue !== existing?.issue) notes.push({ at: localTimestamp(), text: issue });
-  const status = els.fields.status.value;
   return {
-    id: els.fields.id.value || uid(),
     title: els.fields.title.value.trim(),
     description: els.fields.description.value.trim(),
     category: els.fields.category.value.trim() || "General",
     priority: els.fields.priority.value,
-    status,
-    start: els.fields.start.value || todayISO(),
-    due: els.fields.due.value,
-    reminder: Number(els.fields.reminder.value),
-    repeat: els.fields.repeat.value,
-    repeatEvery: Number(els.fields.repeatEvery.value || 1),
+    status: els.fields.status.value,
+    start_date: els.fields.start_date.value || todayISO(),
+    due_date: els.fields.due_date.value || null,
+    reminder: els.fields.reminder.checked,
+    repeat_type: els.fields.repeat_type.value || "None",
+    repeat_every: Number(els.fields.repeat_every.value || 1),
     owner: els.fields.owner.value.trim() || "Me",
-    issue,
-    notes,
-    createdAt: existing?.createdAt || localTimestamp(),
-    updatedAt: localTimestamp(),
-    completedAt: status === "Completed" ? existing?.completedAt || localTimestamp() : "",
+    issue: els.fields.issue.value.trim(),
+    notes: els.fields.notes.value.trim(),
+    archived: false,
   };
 }
 
-function saveForm(event) {
+async function saveForm(event) {
   event.preventDefault();
-  const task = readForm();
-  if (!task.title) return;
-  const index = state.tasks.findIndex((item) => item.id === task.id);
-  if (index >= 0) state.tasks[index] = task;
-  else state.tasks.push(task);
-  saveTasks();
+  const payload = readForm();
+  if (!payload.title) return;
+  const id = els.fields.id.value;
+  await api(id ? `${API_TASKS_URL}/${id}` : API_TASKS_URL, {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(payload),
+  });
+  await loadTasks();
   els.dialog.close();
   render();
 }
@@ -612,7 +520,6 @@ function parseSpokenDate(text) {
 function cleanQuickTitle(text) {
   return text
     .replace(/\b(add|create|new task|remind me to)\b/gi, "")
-    .replace(/\b(reminder|alert)\s+(?:on\s+)?(?:due date|\d+\s+days?\s+before).*/gi, "")
     .replace(/\b(due|by)\s+in\s+\d+\s+days?.*/gi, "")
     .replace(/\b(due|by|on)\s+\d{1,2}(?:st|nd|rd|th)?\s+\w+(?:\s+\d{4})?.*/gi, "")
     .replace(/\b(every|daily|weekly|monthly|quarterly|yearly|tomorrow|today|high priority|urgent|low priority|normal priority).*/gi, "")
@@ -622,59 +529,50 @@ function cleanQuickTitle(text) {
 function parseQuickText(text) {
   const lower = text.toLowerCase();
   const task = {
-    id: uid(),
     title: cleanQuickTitle(text) || text,
     description: text,
     category: lower.includes("gst") || lower.includes("filing") || lower.includes("compliance") ? "Compliance" : lower.includes("payment") || lower.includes("pay") ? "Finance" : "General",
     priority: lower.includes("urgent") ? "Urgent" : lower.includes("high") ? "High" : lower.includes("low") ? "Low" : "Normal",
     status: "Pending",
-    start: todayISO(),
-    due: todayISO(),
-    reminder: lower.includes("urgent") || lower.includes("high") ? 1 : 3,
-    repeat: "none",
-    repeatEvery: 15,
+    start_date: todayISO(),
+    due_date: todayISO(),
+    reminder: true,
+    repeat_type: "None",
+    repeat_every: 1,
     owner: "Me",
     issue: "",
-    notes: [{ at: localTimestamp(), text: `Captured from: ${text}` }],
-    createdAt: localTimestamp(),
-    updatedAt: localTimestamp(),
-    completedAt: "",
+    notes: `Captured from: ${text}`,
+    archived: false,
   };
 
-  if (lower.includes("tomorrow")) task.due = addDays(todayISO(), 1);
-  if (lower.includes("today")) task.due = todayISO();
+  if (lower.includes("tomorrow")) task.due_date = addDays(todayISO(), 1);
   const dueIn = lower.match(/due in (\d+) days?/);
-  if (dueIn) task.due = addDays(todayISO(), Number(dueIn[1]));
+  if (dueIn) task.due_date = addDays(todayISO(), Number(dueIn[1]));
   const spokenDate = parseSpokenDate(text);
-  if (spokenDate) task.due = spokenDate;
+  if (spokenDate) task.due_date = spokenDate;
   const onDay = lower.match(/(?:on|by) (?:the )?(\d{1,2})(?:st|nd|rd|th)?/);
   if (onDay && !spokenDate) {
-    const day = Math.min(28, Number(onDay[1]));
     const date = toDate(todayISO());
-    date.setDate(day);
+    date.setDate(Math.min(28, Number(onDay[1])));
     if (dateISO(date) < todayISO()) date.setMonth(date.getMonth() + 1);
-    task.due = dateISO(date);
+    task.due_date = dateISO(date);
   }
 
-  if (lower.includes("daily") || lower.includes("every day")) task.repeat = "daily";
-  else if (lower.includes("weekly") || lower.includes("every week") || lower.includes("every friday") || lower.includes("every monday")) task.repeat = "weekly";
-  else if (lower.includes("monthly") || lower.includes("every month")) task.repeat = "monthly";
-  else if (lower.includes("quarter")) task.repeat = "quarterly";
-  else if (lower.includes("yearly") || lower.includes("annual")) task.repeat = "yearly";
-
-  const reminderMatch = lower.match(/(?:reminder|alert)\s+(?:on\s+)?(\d+)\s+days?\s+before/);
-  if (reminderMatch) task.reminder = Number(reminderMatch[1]);
-  if (lower.includes("reminder on due date") || lower.includes("alert on due date")) task.reminder = 0;
+  if (lower.includes("daily") || lower.includes("every day")) task.repeat_type = "Daily";
+  else if (lower.includes("weekly") || lower.includes("every week")) task.repeat_type = "Weekly";
+  else if (lower.includes("monthly") || lower.includes("every month")) task.repeat_type = "Monthly";
+  else if (lower.includes("quarter")) task.repeat_type = "Quarterly";
+  else if (lower.includes("yearly") || lower.includes("annual")) task.repeat_type = "Yearly";
 
   return task;
 }
 
-function captureQuick() {
+async function captureQuick() {
   const text = els.quickInput.value.trim();
   if (!text) return;
-  state.tasks.push(parseQuickText(text));
+  await api(API_TASKS_URL, { method: "POST", body: JSON.stringify(parseQuickText(text)) });
   els.quickInput.value = "";
-  saveTasks();
+  await loadTasks();
   render();
 }
 
@@ -702,7 +600,7 @@ function checkNotificationHints() {
   const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
   if (settings.lastNotificationDate === todayISO()) return;
   const pending = state.tasks.filter((task) => taskDerived(task).activeToday);
-  const priority = pending.filter((task) => taskDerived(task).reminderDue || taskDerived(task).overdue || task.priority === "Urgent");
+  const priority = pending.filter((task) => taskDerived(task).overdue || task.priority === "Urgent");
   if (!pending.length) return;
   new Notification("Gautam's PA", {
     body: `${pending.length} pending work item${pending.length > 1 ? "s" : ""} today. ${priority.length} priority alert${priority.length === 1 ? "" : "s"}.`,
@@ -711,21 +609,22 @@ function checkNotificationHints() {
 }
 
 function exportCSV() {
-  const headers = ["Title", "Category", "Priority", "Status", "Start", "Due", "Repeat", "Owner", "Issue", "Created Local", "Updated Local", "Completed Local"];
+  const headers = ["Title", "Category", "Priority", "Status", "Start", "Due", "Repeat", "Owner", "Issue", "Notes", "Created", "Updated", "Completed"];
   const rows = state.tasks.map((task) =>
     [
       task.title,
       task.category,
       task.priority,
       task.status,
-      task.start,
-      task.due,
-      task.repeat,
+      task.start_date,
+      task.due_date,
+      task.repeat_type,
       task.owner,
       task.issue,
-      formatLocalTimestamp(task.createdAt),
-      formatLocalTimestamp(task.updatedAt),
-      formatLocalTimestamp(task.completedAt),
+      task.notes,
+      formatTimestamp(task.created_at),
+      formatTimestamp(task.updated_at),
+      formatTimestamp(task.completed_at),
     ]
       .map((value) => `"${String(value || "").replace(/"/g, '""')}"`)
       .join(",")
@@ -734,7 +633,7 @@ function exportCSV() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `gautams-pa-${todayISO()}.csv`;
+  link.download = `gpa-v3-tasks-${todayISO()}.csv`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -763,18 +662,13 @@ function bindEvents() {
   });
   els.form.addEventListener("submit", saveForm);
   els.deleteTaskBtn.addEventListener("click", () => {
-    const id = els.fields.id.value;
-    const task = state.tasks.find((item) => item.id === id);
-    if (!task || !window.confirm(`Are you sure you want to delete "${task.title}"? This cannot be undone.`)) return;
-    state.tasks = state.tasks.filter((task) => task.id !== id);
-    saveTasks();
-    els.dialog.close();
-    render();
+    const task = state.tasks.find((item) => String(item.id) === String(els.fields.id.value));
+    if (task) deleteTask(task);
   });
   document.body.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
     if (!target) return;
-    const task = state.tasks.find((item) => item.id === target.dataset.id);
+    const task = state.tasks.find((item) => String(item.id) === String(target.dataset.id));
     if (!task) return;
     if (target.dataset.action === "edit") openTaskDialog(task);
     if (target.dataset.action === "complete") completeTask(task);
@@ -794,13 +688,15 @@ function bindEvents() {
 }
 
 async function init() {
-  await loadTasks();
-  bindEvents();
-  setupVoice();
-  if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("service-worker.js").catch(() => {});
+  try {
+    await loadMasterData();
+    await loadTasks();
+    bindEvents();
+    setupVoice();
+    render();
+  } catch (error) {
+    document.body.innerHTML = `<main class="main"><div class="panel"><h2>GPA V3 could not load</h2><p class="task-meta">${escapeHtml(error.message)}</p></div></main>`;
   }
-  render();
 }
 
 init();
