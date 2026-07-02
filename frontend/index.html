@@ -77,8 +77,8 @@
             <button class="mic-button" id="voiceBtn" title="Speak a task" aria-label="Speak a task">
               <span aria-hidden="true">Mic</span>
             </button>
-            <input id="quickInput" type="text" placeholder="Try: File GST R1 every month on 10th high priority" />
-            <button class="secondary-button" id="parseQuickBtn">Capture</button>
+            <input id="quickInput" type="text" placeholder="Try: Remind me to call Kalpesh tomorrow morning" />
+            <button class="secondary-button" id="parseQuickBtn">Ask AI</button>
           </div>
           <div class="chips">
             <button class="chip" data-template="Call client tomorrow high priority">Call tomorrow</button>
@@ -136,11 +136,11 @@
           </label>
           <label>
             <span>Start date</span>
-            <input id="taskStart" type="date" />
+            <input id="taskStart" type="date" required />
           </label>
           <label>
             <span>Due / last date</span>
-            <input id="taskDue" type="date" />
+            <input id="taskDue" type="date" required />
           </label>
           <label class="checkbox-field">
             <span>Reminder active</span>
@@ -194,7 +194,7 @@
           </label>
           <label>
             <span>Mobile / SMS</span>
-            <input id="clientPhone" />
+            <input id="clientPhone" required />
           </label>
           <label>
             <span>WhatsApp</span>

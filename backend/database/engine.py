@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.core.config import DATABASE_URL
+from backend.models.activity import ActivityLog
 from backend.models.client import Client
 from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
 from backend.models.task import Task
@@ -23,6 +24,7 @@ SEED_DATA = {
 }
 
 TASK_COLUMNS = {
+    "uuid": "TEXT",
     "category": "TEXT DEFAULT 'Client'",
     "priority": "TEXT DEFAULT 'Normal'",
     "status": "TEXT DEFAULT 'Pending'",
@@ -36,6 +38,7 @@ TASK_COLUMNS = {
     "issue": "TEXT DEFAULT ''",
     "notes": "TEXT DEFAULT ''",
     "archived": "BOOLEAN DEFAULT 0",
+    "telegram_sent": "BOOLEAN DEFAULT 0",
     "completed_at": "DATETIME",
     "created_at": "DATETIME",
     "updated_at": "DATETIME",
@@ -59,6 +62,7 @@ def migrate_task_table():
                 connection.execute(text(f"ALTER TABLE tasks ADD COLUMN {column} {definition}"))
 
         today = date.today().isoformat()
+        connection.execute(text("UPDATE tasks SET uuid = lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-' || hex(randomblob(2)) || '-' || hex(randomblob(2)) || '-' || hex(randomblob(6))) WHERE uuid IS NULL OR uuid = ''"))
         connection.execute(text("UPDATE tasks SET category = 'Client' WHERE category IS NULL OR category = '' OR category = 'General'"))
         connection.execute(text("UPDATE tasks SET priority = 'Normal' WHERE priority IS NULL OR priority = '' OR priority = 'Medium'"))
         connection.execute(text("UPDATE tasks SET status = 'Pending' WHERE status IS NULL OR status = ''"))
@@ -70,6 +74,7 @@ def migrate_task_table():
         connection.execute(text("UPDATE tasks SET issue = '' WHERE issue IS NULL"))
         connection.execute(text("UPDATE tasks SET notes = '' WHERE notes IS NULL"))
         connection.execute(text("UPDATE tasks SET archived = 0 WHERE archived IS NULL"))
+        connection.execute(text("UPDATE tasks SET telegram_sent = 0 WHERE telegram_sent IS NULL"))
 
 
 def seed_master_data():

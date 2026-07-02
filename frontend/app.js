@@ -1,12 +1,16 @@
 const API_TASKS_URL = "/api/tasks";
 const API_MASTER_DATA_URL = "/api/master-data";
 const API_CLIENTS_URL = "/api/clients";
+const API_ACTIVITY_URL = "/api/activity";
+const API_ASSISTANT_URL = "/api/assistant/command";
 const SETTINGS_KEY = "gpa-v3-settings";
 const LOCAL_TIME_ZONE = "Asia/Kolkata";
 
 const state = {
   tasks: [],
   clients: [],
+  activity: [],
+  conversation: [],
   master: {
     categories: [],
     priorities: [],
@@ -217,6 +221,11 @@ async function loadClients() {
   state.clients = Array.isArray(clients) ? clients : [];
 }
 
+async function loadActivity() {
+  const activity = await api(API_ACTIVITY_URL);
+  state.activity = Array.isArray(activity) ? activity : [];
+}
+
 function optionTags(values, selected = "") {
   return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
 }
@@ -288,6 +297,7 @@ async function completeTask(task) {
   if (!window.confirm(`Mark "${task.title}" as completed?`)) return;
   await api(`${API_TASKS_URL}/${task.id}/complete`, { method: "PUT" });
   await loadTasks();
+  await loadActivity();
   render();
 }
 
@@ -295,6 +305,7 @@ async function deleteTask(task) {
   if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
   await api(`${API_TASKS_URL}/${task.id}`, { method: "DELETE" });
   await loadTasks();
+  await loadActivity();
   els.dialog.close();
   render();
 }
@@ -393,6 +404,30 @@ function renderDashboard() {
       <div class="panel">
         <div class="panel-head"><h3>Recurring work</h3><span class="mini">${stats.recurring} scheduled</span></div>
         ${renderTaskList(active.filter((task) => task.repeat_type && task.repeat_type !== "None").slice(0, 8), "No recurring work yet")}
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>AI suggestions</h3><span class="mini">Offline assistant</span></div>
+        <div class="task-note">Ask: show pending tasks, complete the first task, or remind me to call Kalpesh tomorrow.</div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Recent activity</h3><span class="mini">${state.activity.length} latest</span></div>
+        <div class="task-list">
+          ${
+            state.activity.length
+              ? state.activity.slice(0, 8).map((item) => `<div class="master-row"><span>${escapeHtml(item.summary)}</span><span class="mini">${formatTimestamp(item.created_at)}</span></div>`).join("")
+              : renderTaskList([], "No activity yet")
+          }
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Conversation history</h3><span class="mini">${state.conversation.length} messages</span></div>
+        <div class="task-list">
+          ${
+            state.conversation.length
+              ? state.conversation.slice(-6).map((item) => `<div class="task-note"><strong>${escapeHtml(item.role)}:</strong> ${escapeHtml(item.text)}</div>`).join("")
+              : "<div class='task-note'>Use the voice or Ask AI input to start.</div>"
+          }
+        </div>
       </div>
     </div>
   `;
@@ -650,11 +685,13 @@ async function saveClientForm(event) {
   const payload = readClientForm();
   if (!payload.name) return;
   const id = els.clientFields.id.value;
+  if (!window.confirm(`${id ? "Edit" : "Add"} client "${payload.name}"?`)) return;
   await api(id ? `${API_CLIENTS_URL}/${id}` : API_CLIENTS_URL, {
     method: id ? "PUT" : "POST",
     body: JSON.stringify(payload),
   });
   await loadClients();
+  await loadActivity();
   populateMasterControls();
   els.clientDialog.close();
   render();
@@ -665,6 +702,7 @@ async function deleteClientFromDialog() {
   if (!id || !window.confirm("Delete this client? Existing task history will remain.")) return;
   await api(`${API_CLIENTS_URL}/${id}`, { method: "DELETE" });
   await loadClients();
+  await loadActivity();
   populateMasterControls();
   els.clientDialog.close();
   render();
@@ -686,12 +724,14 @@ async function saveMasterForm(event) {
   const id = els.masterFields.id.value;
   const name = els.masterFields.name.value.trim();
   if (!type || !name) return;
+  if (!window.confirm(`${id ? "Edit" : "Add"} ${type === "owners" ? "assignee" : "category"} "${name}"?`)) return;
   await api(id ? `${API_MASTER_DATA_URL}/${type}/${id}` : `${API_MASTER_DATA_URL}/${type}`, {
     method: id ? "PUT" : "POST",
     body: JSON.stringify(id ? { name, active: true } : { name }),
   });
   await loadMasterData();
   await loadTasks();
+  await loadActivity();
   populateMasterControls();
   els.masterDialog.close();
   render();
@@ -703,6 +743,7 @@ async function deleteMasterFromDialog() {
   if (!type || !id || !window.confirm("Delete this item from future dropdowns?")) return;
   await api(`${API_MASTER_DATA_URL}/${type}/${id}`, { method: "DELETE" });
   await loadMasterData();
+  await loadActivity();
   populateMasterControls();
   els.masterDialog.close();
   render();
@@ -713,11 +754,13 @@ async function saveForm(event) {
   const payload = readForm();
   if (!payload.title) return;
   const id = els.fields.id.value;
+  if (!window.confirm(`${id ? "Edit" : "Add"} task "${payload.title}"?`)) return;
   await api(id ? `${API_TASKS_URL}/${id}` : API_TASKS_URL, {
     method: id ? "PUT" : "POST",
     body: JSON.stringify(payload),
   });
   await loadTasks();
+  await loadActivity();
   els.dialog.close();
   render();
 }
@@ -783,13 +826,25 @@ function parseQuickText(text) {
   return task;
 }
 
+async function runAssistantCommand(text) {
+  const response = await api(API_ASSISTANT_URL, {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+  state.conversation.push({ role: "You", text });
+  state.conversation.push({ role: "GPA", text: response.message || "Done." });
+  await loadTasks();
+  await loadActivity();
+  render();
+  return response;
+}
+
 async function captureQuick() {
   const text = els.quickInput.value.trim();
   if (!text) return;
-  await api(API_TASKS_URL, { method: "POST", body: JSON.stringify(parseQuickText(text)) });
+  if (!window.confirm(`Send this command to GPA AI?\n\n${text}`)) return;
+  await runAssistantCommand(text);
   els.quickInput.value = "";
-  await loadTasks();
-  render();
 }
 
 function setupVoice() {
@@ -933,6 +988,7 @@ async function init() {
     await loadClients();
     populateMasterControls();
     await loadTasks();
+    await loadActivity();
     bindEvents();
     setupVoice();
     render();
