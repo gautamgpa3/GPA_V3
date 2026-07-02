@@ -1,10 +1,12 @@
 const API_TASKS_URL = "/api/tasks";
 const API_MASTER_DATA_URL = "/api/master-data";
+const API_CLIENTS_URL = "/api/clients";
 const SETTINGS_KEY = "gpa-v3-settings";
 const LOCAL_TIME_ZONE = "Asia/Kolkata";
 
 const state = {
   tasks: [],
+  clients: [],
   master: {
     categories: [],
     priorities: [],
@@ -31,6 +33,8 @@ const els = {
     calendar: document.querySelector("#calendarView"),
     board: document.querySelector("#boardView"),
     reports: document.querySelector("#reportsView"),
+    clients: document.querySelector("#clientsView"),
+    settings: document.querySelector("#settingsView"),
   },
   navItems: document.querySelectorAll(".nav-item"),
   quickAddBtn: document.querySelector("#quickAddBtn"),
@@ -44,13 +48,20 @@ const els = {
   form: document.querySelector("#taskForm"),
   dialogTitle: document.querySelector("#dialogTitle"),
   deleteTaskBtn: document.querySelector("#deleteTaskBtn"),
-  categoryList: document.querySelector("#categoryList"),
-  ownerList: document.querySelector("#ownerList"),
+  clientDialog: document.querySelector("#clientDialog"),
+  clientForm: document.querySelector("#clientForm"),
+  clientDialogTitle: document.querySelector("#clientDialogTitle"),
+  deleteClientBtn: document.querySelector("#deleteClientBtn"),
+  masterDialog: document.querySelector("#masterDialog"),
+  masterForm: document.querySelector("#masterForm"),
+  masterDialogTitle: document.querySelector("#masterDialogTitle"),
+  deleteMasterBtn: document.querySelector("#deleteMasterBtn"),
   fields: {
     id: document.querySelector("#taskId"),
     title: document.querySelector("#taskTitle"),
     description: document.querySelector("#taskDescription"),
     category: document.querySelector("#taskCategory"),
+    client_id: document.querySelector("#taskClient"),
     priority: document.querySelector("#taskPriority"),
     status: document.querySelector("#taskStatus"),
     start_date: document.querySelector("#taskStart"),
@@ -61,6 +72,21 @@ const els = {
     owner: document.querySelector("#taskOwner"),
     issue: document.querySelector("#taskIssue"),
     notes: document.querySelector("#taskNotes"),
+  },
+  clientFields: {
+    id: document.querySelector("#clientId"),
+    name: document.querySelector("#clientName"),
+    phone: document.querySelector("#clientPhone"),
+    whatsapp: document.querySelector("#clientWhatsapp"),
+    address: document.querySelector("#clientAddress"),
+    gst_no: document.querySelector("#clientGst"),
+    work_scope: document.querySelector("#clientWorkScope"),
+    notes: document.querySelector("#clientNotes"),
+  },
+  masterFields: {
+    type: document.querySelector("#masterType"),
+    id: document.querySelector("#masterId"),
+    name: document.querySelector("#masterName"),
   },
   emptyTemplate: document.querySelector("#emptyTemplate"),
 };
@@ -144,9 +170,10 @@ function normalizeTask(task) {
     id: task.id,
     title: task.title || "",
     description: task.description || "",
-    category: task.category || "General",
+    category: task.category || "Client",
     priority: task.priority || "Normal",
     status: task.status || "Pending",
+    client_id: task.client_id || "",
     start_date: task.start_date || todayISO(),
     due_date: task.due_date || "",
     reminder: Boolean(task.reminder),
@@ -185,16 +212,33 @@ async function loadTasks() {
   state.tasks = Array.isArray(tasks) ? tasks.map(normalizeTask) : [];
 }
 
+async function loadClients() {
+  const clients = await api(API_CLIENTS_URL);
+  state.clients = Array.isArray(clients) ? clients : [];
+}
+
 function optionTags(values, selected = "") {
   return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
 }
 
+function clientName(clientId) {
+  if (!clientId) return "";
+  return state.clients.find((client) => Number(client.id) === Number(clientId))?.name || "";
+}
+
+function phoneDigits(value = "") {
+  return String(value).replace(/[^\d]/g, "");
+}
+
 function populateMasterControls() {
+  els.fields.category.innerHTML = optionTags(state.master.categories);
   els.fields.priority.innerHTML = optionTags(state.master.priorities);
   els.fields.status.innerHTML = optionTags(state.master.statuses);
   els.fields.repeat_type.innerHTML = optionTags(state.master.repeat_types);
-  els.categoryList.innerHTML = state.master.categories.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
-  els.ownerList.innerHTML = state.master.owners.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
+  els.fields.owner.innerHTML = optionTags(state.master.owners);
+  els.fields.client_id.innerHTML = `<option value="">No client</option>${state.clients
+    .map((client) => `<option value="${client.id}">${escapeHtml(client.name)}</option>`)
+    .join("")}`;
 }
 
 function taskDerived(task) {
@@ -272,7 +316,7 @@ function taskCard(task) {
       <div class="task-row">
         <div>
           <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(task.title)}</button>
-          <div class="task-meta">${escapeHtml(task.category)} - ${formatDate(task.due_date)} - Active ${d.age} days</div>
+          <div class="task-meta">${escapeHtml(task.category)}${task.client_id ? ` - ${escapeHtml(clientName(task.client_id))}` : ""} - ${formatDate(task.due_date)} - Active ${d.age} days</div>
         </div>
         ${d.isDone ? "" : `<button class="icon-button" data-action="complete" data-id="${task.id}" title="Mark complete">OK</button>`}
       </div>
@@ -417,7 +461,7 @@ function renderReports() {
   const active = state.tasks.filter((task) => !taskDerived(task).isDone);
   const byStatus = state.master.statuses.map((status) => [status, state.tasks.filter((task) => task.status === status).length]);
   const byPriority = state.master.priorities.map((priority) => [priority, state.tasks.filter((task) => task.priority === priority).length]);
-  const byCategory = [...new Set(state.tasks.map((task) => task.category || "General"))].map((category) => [category, state.tasks.filter((task) => (task.category || "General") === category).length]);
+  const byCategory = [...new Set(state.tasks.map((task) => task.category || "Client"))].map((category) => [category, state.tasks.filter((task) => (task.category || "Client") === category).length]);
   const aging = active.map((task) => ({ task, age: taskDerived(task).age })).sort((a, b) => b.age - a.age).slice(0, 6);
 
   els.views.reports.innerHTML = `
@@ -425,9 +469,79 @@ function renderReports() {
       <div class="report-card"><h3>Status report</h3>${byStatus.map(([label, value]) => reportLine(label, value, stats.total)).join("")}</div>
       <div class="report-card"><h3>Priority report</h3>${byPriority.map(([label, value]) => reportLine(label, value, stats.total)).join("")}</div>
       <div class="report-card"><h3>Category report</h3>${byCategory.map(([label, value]) => reportLine(label, value, stats.total)).join("")}</div>
+      <div class="report-card"><h3>Assigned to report</h3>${state.master.owners.map((owner) => reportLine(owner, state.tasks.filter((task) => task.owner === owner && !taskDerived(task).isDone).length, Math.max(stats.active, 1))).join("")}</div>
       <div class="report-card"><h3>Aging report</h3>${aging.length ? aging.map(({ task, age }) => `<p class="task-meta"><strong>${escapeHtml(task.title)}</strong><br>${age} active days - due ${formatDate(task.due_date)}</p>`).join("") : "<p class='task-meta'>No active aging yet.</p>"}</div>
       <div class="report-card"><h3>Alert report</h3>${reportLine("Today's pending", stats.today, Math.max(stats.active, 1))}${reportLine("Due today", stats.dueToday, Math.max(stats.active, 1))}${reportLine("Overdue", stats.overdue, Math.max(stats.active, 1))}${reportLine("Blocked / issue", stats.blocked, Math.max(stats.active, 1))}</div>
       <div class="report-card"><h3>Completion report</h3>${reportLine("Completed", stats.completed, Math.max(stats.total, 1))}${reportLine("Active", stats.active, Math.max(stats.total, 1))}${reportLine("Recurring", stats.recurring, Math.max(stats.total, 1))}</div>
+    </div>
+  `;
+}
+
+function renderClients() {
+  els.views.clients.innerHTML = `
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Clients</h3>
+        <button class="primary-button" data-action="add-client">Add client</button>
+      </div>
+      <div class="client-grid">
+        ${state.clients
+          .map((client) => {
+            const whatsapp = phoneDigits(client.whatsapp || client.phone);
+            const sms = phoneDigits(client.phone);
+            const message = encodeURIComponent(`Hello ${client.name}, please submit required documents for ${client.work_scope || "your pending work"}.`);
+            return `
+              <article class="client-card">
+                <div class="task-row">
+                  <div>
+                    <button class="task-title" data-action="edit-client" data-id="${client.id}">${escapeHtml(client.name)}</button>
+                    <div class="task-meta">${escapeHtml(client.phone || "No phone")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
+                  </div>
+                </div>
+                <div class="task-note">${escapeHtml(client.work_scope || "No work scope recorded")}</div>
+                <div class="badges">
+                  ${client.address ? createBadge("Address saved", "blue") : ""}
+                  ${client.notes ? createBadge("Notes", "green") : ""}
+                </div>
+                <div class="inline-actions">
+                  <a class="secondary-button link-button" href="https://wa.me/${whatsapp}?text=${message}" target="_blank" rel="noreferrer">WhatsApp</a>
+                  <a class="secondary-button link-button" href="sms:${sms}?body=${message}">SMS</a>
+                </div>
+              </article>
+            `;
+          })
+          .join("") || renderTaskList([], "No clients added yet")}
+      </div>
+    </div>
+  `;
+}
+
+function masterList(title, type, items) {
+  return `
+    <div class="report-card">
+      <div class="panel-head">
+        <h3>${title}</h3>
+        <button class="secondary-button" data-action="add-master" data-type="${type}">Add</button>
+      </div>
+      <div class="task-list">
+        ${items
+          .map((item) => `
+            <div class="master-row">
+              <span>${escapeHtml(item.name)}</span>
+              <button class="icon-button" data-action="edit-master" data-type="${type}" data-id="${item.id}" data-name="${escapeHtml(item.name)}">Edit</button>
+            </div>
+          `)
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
+function renderSettings() {
+  els.views.settings.innerHTML = `
+    <div class="report-grid">
+      ${masterList("Categories", "categories", state.master.category_items || [])}
+      ${masterList("Assigned to / staff", "owners", state.master.owner_items || [])}
     </div>
   `;
 }
@@ -442,6 +556,8 @@ function render() {
   renderCalendar();
   renderBoard();
   renderReports();
+  renderClients();
+  renderSettings();
   checkNotificationHints();
 }
 
@@ -454,7 +570,8 @@ function openTaskDialog(task = null) {
     id: "",
     title: "",
     description: "",
-    category: "General",
+    category: state.master.categories[0] || "Client",
+    client_id: "",
     priority: state.master.priorities[0] || "Normal",
     status: state.master.statuses[0] || "Pending",
     start_date: todayISO(),
@@ -478,9 +595,10 @@ function readForm() {
   return {
     title: els.fields.title.value.trim(),
     description: els.fields.description.value.trim(),
-    category: els.fields.category.value.trim() || "General",
+    category: els.fields.category.value || "Client",
     priority: els.fields.priority.value,
     status: els.fields.status.value,
+    client_id: els.fields.client_id.value ? Number(els.fields.client_id.value) : null,
     start_date: els.fields.start_date.value || todayISO(),
     due_date: els.fields.due_date.value || null,
     reminder: els.fields.reminder.checked,
@@ -491,6 +609,103 @@ function readForm() {
     notes: els.fields.notes.value.trim(),
     archived: false,
   };
+}
+
+function openClientDialog(client = null) {
+  els.clientForm.reset();
+  els.deleteClientBtn.hidden = !client;
+  els.clientDialogTitle.textContent = client ? "Edit client" : "Add client";
+  const defaults = {
+    id: "",
+    name: "",
+    phone: "",
+    whatsapp: "",
+    address: "",
+    gst_no: "",
+    work_scope: "",
+    notes: "",
+  };
+  const data = { ...defaults, ...(client || {}) };
+  Object.entries(els.clientFields).forEach(([key, field]) => {
+    field.value = data[key] ?? "";
+  });
+  els.clientDialog.showModal();
+}
+
+function readClientForm() {
+  return {
+    name: els.clientFields.name.value.trim(),
+    phone: els.clientFields.phone.value.trim(),
+    whatsapp: els.clientFields.whatsapp.value.trim(),
+    address: els.clientFields.address.value.trim(),
+    gst_no: els.clientFields.gst_no.value.trim(),
+    work_scope: els.clientFields.work_scope.value.trim(),
+    notes: els.clientFields.notes.value.trim(),
+    active: true,
+  };
+}
+
+async function saveClientForm(event) {
+  event.preventDefault();
+  const payload = readClientForm();
+  if (!payload.name) return;
+  const id = els.clientFields.id.value;
+  await api(id ? `${API_CLIENTS_URL}/${id}` : API_CLIENTS_URL, {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(payload),
+  });
+  await loadClients();
+  populateMasterControls();
+  els.clientDialog.close();
+  render();
+}
+
+async function deleteClientFromDialog() {
+  const id = els.clientFields.id.value;
+  if (!id || !window.confirm("Delete this client? Existing task history will remain.")) return;
+  await api(`${API_CLIENTS_URL}/${id}`, { method: "DELETE" });
+  await loadClients();
+  populateMasterControls();
+  els.clientDialog.close();
+  render();
+}
+
+function openMasterDialog(type, item = null) {
+  els.masterForm.reset();
+  els.masterFields.type.value = type;
+  els.masterFields.id.value = item?.id || "";
+  els.masterFields.name.value = item?.name || "";
+  els.deleteMasterBtn.hidden = !item;
+  els.masterDialogTitle.textContent = `${item ? "Edit" : "Add"} ${type === "owners" ? "assignee" : "category"}`;
+  els.masterDialog.showModal();
+}
+
+async function saveMasterForm(event) {
+  event.preventDefault();
+  const type = els.masterFields.type.value;
+  const id = els.masterFields.id.value;
+  const name = els.masterFields.name.value.trim();
+  if (!type || !name) return;
+  await api(id ? `${API_MASTER_DATA_URL}/${type}/${id}` : `${API_MASTER_DATA_URL}/${type}`, {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(id ? { name, active: true } : { name }),
+  });
+  await loadMasterData();
+  await loadTasks();
+  populateMasterControls();
+  els.masterDialog.close();
+  render();
+}
+
+async function deleteMasterFromDialog() {
+  const type = els.masterFields.type.value;
+  const id = els.masterFields.id.value;
+  if (!type || !id || !window.confirm("Delete this item from future dropdowns?")) return;
+  await api(`${API_MASTER_DATA_URL}/${type}/${id}`, { method: "DELETE" });
+  await loadMasterData();
+  populateMasterControls();
+  els.masterDialog.close();
+  render();
 }
 
 async function saveForm(event) {
@@ -531,9 +746,10 @@ function parseQuickText(text) {
   const task = {
     title: cleanQuickTitle(text) || text,
     description: text,
-    category: lower.includes("gst") || lower.includes("filing") || lower.includes("compliance") ? "Compliance" : lower.includes("payment") || lower.includes("pay") ? "Finance" : "General",
+    category: lower.includes("friend") ? "Friend" : lower.includes("personal") ? "Personal" : lower.includes("payment") || lower.includes("pay") ? "Finance" : "Client",
     priority: lower.includes("urgent") ? "Urgent" : lower.includes("high") ? "High" : lower.includes("low") ? "Low" : "Normal",
     status: "Pending",
+    client_id: null,
     start_date: todayISO(),
     due_date: todayISO(),
     reminder: true,
@@ -661,13 +877,37 @@ function bindEvents() {
     render();
   });
   els.form.addEventListener("submit", saveForm);
+  els.clientForm.addEventListener("submit", saveClientForm);
+  els.masterForm.addEventListener("submit", saveMasterForm);
   els.deleteTaskBtn.addEventListener("click", () => {
     const task = state.tasks.find((item) => String(item.id) === String(els.fields.id.value));
     if (task) deleteTask(task);
   });
+  els.deleteClientBtn.addEventListener("click", deleteClientFromDialog);
+  els.deleteMasterBtn.addEventListener("click", deleteMasterFromDialog);
   document.body.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
     if (!target) return;
+    if (target.dataset.action === "add-client") {
+      openClientDialog();
+      return;
+    }
+    if (target.dataset.action === "edit-client") {
+      const client = state.clients.find((item) => String(item.id) === String(target.dataset.id));
+      if (client) openClientDialog(client);
+      return;
+    }
+    if (target.dataset.action === "add-master") {
+      openMasterDialog(target.dataset.type);
+      return;
+    }
+    if (target.dataset.action === "edit-master") {
+      openMasterDialog(target.dataset.type, {
+        id: target.dataset.id,
+        name: target.dataset.name,
+      });
+      return;
+    }
     const task = state.tasks.find((item) => String(item.id) === String(target.dataset.id));
     if (!task) return;
     if (target.dataset.action === "edit") openTaskDialog(task);
@@ -690,6 +930,8 @@ function bindEvents() {
 async function init() {
   try {
     await loadMasterData();
+    await loadClients();
+    populateMasterControls();
     await loadTasks();
     bindEvents();
     setupVoice();

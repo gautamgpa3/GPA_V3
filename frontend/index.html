@@ -37,6 +37,12 @@
           <button class="nav-item" data-view="reports" title="Reports">
             <span aria-hidden="true">R</span><span>Reports</span>
           </button>
+          <button class="nav-item" data-view="clients" title="Clients">
+            <span aria-hidden="true">CL</span><span>Clients</span>
+          </button>
+          <button class="nav-item" data-view="settings" title="Settings">
+            <span aria-hidden="true">S</span><span>Settings</span>
+          </button>
         </nav>
 
         <div class="sidebar-footer">
@@ -87,6 +93,8 @@
         <section id="calendarView" class="view"></section>
         <section id="boardView" class="view"></section>
         <section id="reportsView" class="view"></section>
+        <section id="clientsView" class="view"></section>
+        <section id="settingsView" class="view"></section>
       </main>
     </div>
 
@@ -111,8 +119,12 @@
             <textarea id="taskDescription" rows="3"></textarea>
           </label>
           <label>
-            <span>Category / client</span>
-            <input id="taskCategory" list="categoryList" />
+            <span>Category</span>
+            <select id="taskCategory"></select>
+          </label>
+          <label>
+            <span>Client</span>
+            <select id="taskClient"></select>
           </label>
           <label>
             <span>Priority</span>
@@ -144,7 +156,7 @@
           </label>
           <label>
             <span>Assigned / owner</span>
-            <input id="taskOwner" list="ownerList" />
+            <select id="taskOwner"></select>
           </label>
           <label class="full">
             <span>Issue / current note</span>
@@ -165,8 +177,78 @@
       </form>
     </dialog>
 
-    <datalist id="categoryList"></datalist>
-    <datalist id="ownerList"></datalist>
+    <dialog id="clientDialog">
+      <form method="dialog" class="task-form" id="clientForm">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">Client details</p>
+            <h3 id="clientDialogTitle">Add client</h3>
+          </div>
+          <button class="icon-button" value="cancel" formnovalidate title="Close">X</button>
+        </div>
+        <input type="hidden" id="clientId" />
+        <div class="form-grid">
+          <label>
+            <span>Name</span>
+            <input id="clientName" required maxlength="200" />
+          </label>
+          <label>
+            <span>Mobile / SMS</span>
+            <input id="clientPhone" />
+          </label>
+          <label>
+            <span>WhatsApp</span>
+            <input id="clientWhatsapp" />
+          </label>
+          <label>
+            <span>GST No.</span>
+            <input id="clientGst" />
+          </label>
+          <label class="full">
+            <span>Address</span>
+            <textarea id="clientAddress" rows="3"></textarea>
+          </label>
+          <label class="full">
+            <span>Work scope</span>
+            <textarea id="clientWorkScope" rows="3" placeholder="Income tax, GST, audit, ROC..."></textarea>
+          </label>
+          <label class="full">
+            <span>Notes</span>
+            <textarea id="clientNotes" rows="3"></textarea>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button class="danger-button" id="deleteClientBtn" type="button">Delete</button>
+          <div class="spacer"></div>
+          <button class="secondary-button" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary-button" value="default">Save client</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="masterDialog">
+      <form method="dialog" class="task-form compact-form" id="masterForm">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">Master data</p>
+            <h3 id="masterDialogTitle">Add item</h3>
+          </div>
+          <button class="icon-button" value="cancel" formnovalidate title="Close">X</button>
+        </div>
+        <input type="hidden" id="masterType" />
+        <input type="hidden" id="masterId" />
+        <label>
+          <span>Name</span>
+          <input id="masterName" required maxlength="120" />
+        </label>
+        <div class="dialog-actions">
+          <button class="danger-button" id="deleteMasterBtn" type="button">Delete</button>
+          <div class="spacer"></div>
+          <button class="secondary-button" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary-button" value="default">Save</button>
+        </div>
+      </form>
+    </dialog>
 
     <template id="emptyTemplate">
       <div class="empty-state">

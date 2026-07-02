@@ -4,6 +4,7 @@ from sqlalchemy import text
 from sqlmodel import SQLModel, Session, create_engine, select
 
 from backend.core.config import DATABASE_URL
+from backend.models.client import Client
 from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
 from backend.models.task import Task
 
@@ -14,7 +15,7 @@ engine = create_engine(
 )
 
 SEED_DATA = {
-    Category: ["General", "Compliance", "Client", "Finance", "Office", "Personal", "Review"],
+    Category: ["Client", "Personal", "Finance", "Friend"],
     Priority: ["Urgent", "High", "Normal", "Low"],
     Status: ["Pending", "Going On", "Waiting", "Blocked", "Completed", "Delayed", "Cancelled"],
     Owner: ["Me"],
@@ -22,9 +23,10 @@ SEED_DATA = {
 }
 
 TASK_COLUMNS = {
-    "category": "TEXT DEFAULT 'General'",
+    "category": "TEXT DEFAULT 'Client'",
     "priority": "TEXT DEFAULT 'Normal'",
     "status": "TEXT DEFAULT 'Pending'",
+    "client_id": "INTEGER",
     "start_date": "DATE",
     "due_date": "DATE",
     "reminder": "BOOLEAN DEFAULT 1",
@@ -57,7 +59,7 @@ def migrate_task_table():
                 connection.execute(text(f"ALTER TABLE tasks ADD COLUMN {column} {definition}"))
 
         today = date.today().isoformat()
-        connection.execute(text("UPDATE tasks SET category = 'General' WHERE category IS NULL OR category = ''"))
+        connection.execute(text("UPDATE tasks SET category = 'Client' WHERE category IS NULL OR category = '' OR category = 'General'"))
         connection.execute(text("UPDATE tasks SET priority = 'Normal' WHERE priority IS NULL OR priority = '' OR priority = 'Medium'"))
         connection.execute(text("UPDATE tasks SET status = 'Pending' WHERE status IS NULL OR status = ''"))
         connection.execute(text("UPDATE tasks SET start_date = :today WHERE start_date IS NULL"), {"today": today})
@@ -73,10 +75,20 @@ def migrate_task_table():
 def seed_master_data():
     with Session(engine) as session:
         for model, names in SEED_DATA.items():
+            if model is Category:
+                existing_items = session.exec(select(model)).all()
+                for item in existing_items:
+                    if item.name not in names:
+                        item.active = False
+                        session.add(item)
             for index, name in enumerate(names, start=1):
                 exists = session.exec(select(model).where(model.name == name)).first()
                 if not exists:
                     session.add(model(name=name, sort_order=index))
+                else:
+                    exists.sort_order = index
+                    exists.active = True
+                    session.add(exists)
         session.commit()
 
 

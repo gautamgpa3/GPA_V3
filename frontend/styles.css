@@ -522,6 +522,56 @@ button {
   padding: 16px;
 }
 
+.client-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+}
+
+.client-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.link-button {
+  align-items: center;
+  display: inline-flex;
+  min-height: 36px;
+  text-decoration: none;
+}
+
+.master-row {
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 8px 10px;
+}
+
+.compact-form {
+  display: grid;
+  gap: 14px;
+}
+
+.checkbox-field input {
+  justify-self: start;
+  min-height: 20px;
+  width: 20px;
+}
+
 .report-card h3 {
   margin: 0 0 12px;
 }
@@ -645,7 +695,7 @@ textarea {
 
   .nav,
   .sidebar-footer {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .content-grid,
@@ -707,7 +757,7 @@ textarea {
     bottom: 0;
     display: grid;
     gap: 0;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(7, 1fr);
     left: 0;
     padding: 7px 8px calc(7px + env(safe-area-inset-bottom));
     position: fixed;
@@ -739,6 +789,10 @@ textarea {
 
   .day-cell {
     min-height: 90px;
+  }
+
+  .client-grid {
+    grid-template-columns: 1fr;
   }
 
   dialog {

@@ -10,9 +10,10 @@ class Task(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
     description: str = ""
-    category: str = "General"
+    category: str = "Client"
     priority: str = "Normal"
     status: str = "Pending"
+    client_id: Optional[int] = None
     start_date: Optional[date] = None
     due_date: Optional[date] = None
     reminder: bool = True
