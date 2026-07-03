@@ -884,23 +884,49 @@ async function captureQuick() {
   els.quickInput.value = "";
 }
 
+function showVoiceNotice(message) {
+  els.voiceBtn.title = message;
+  els.voiceBtn.setAttribute("aria-label", message);
+  els.voiceBtn.addEventListener("click", () => window.alert(message));
+}
+
 function setupVoice() {
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SpeechRecognition) {
-    els.voiceBtn.title = "Voice capture is not supported in this browser";
+  if (!window.isSecureContext) {
+    showVoiceNotice("Voice commands need HTTPS on VPS. Open GPA with https:// or use localhost while developing.");
     return;
   }
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    showVoiceNotice("Voice capture is supported in Chrome or Edge. Type the command here for now.");
+    return;
+  }
+
   const recognition = new SpeechRecognition();
   recognition.lang = "en-IN";
   recognition.interimResults = false;
   recognition.maxAlternatives = 1;
   recognition.onstart = () => els.voiceBtn.classList.add("listening");
   recognition.onend = () => els.voiceBtn.classList.remove("listening");
+  recognition.onerror = (event) => {
+    els.voiceBtn.classList.remove("listening");
+    const message =
+      event.error === "not-allowed"
+        ? "Microphone permission is blocked. Allow microphone access in your browser settings and try again."
+        : `Voice capture failed: ${event.error}. You can type the same command here.`;
+    window.alert(message);
+  };
   recognition.onresult = (event) => {
     els.quickInput.value = event.results[0][0].transcript;
     captureQuick();
   };
-  els.voiceBtn.addEventListener("click", () => recognition.start());
+  els.voiceBtn.addEventListener("click", () => {
+    try {
+      recognition.start();
+    } catch (error) {
+      window.alert("Voice capture is already starting. Please wait a moment and try again if needed.");
+    }
+  });
 }
 
 function checkNotificationHints() {

@@ -83,6 +83,41 @@ Replace `YOUR_DOMAIN_OR_SERVER_IP` with your domain or VPS IP.
 http://YOUR_SERVER_IP/
 ```
 
+## 10. Enable HTTPS for voice commands
+
+Voice commands use the browser microphone and speech recognition APIs. Browsers allow this on `localhost`, but on a public VPS they require HTTPS. A raw `http://SERVER_IP/` page can load the app, but the mic button will not work reliably.
+
+Use a domain or subdomain pointed to your VPS IP, for example `gpa.yourdomain.com`. Then update Nginx:
+
+```bash
+nano /etc/nginx/sites-available/gpa-v3
+```
+
+Set:
+
+```nginx
+server_name gpa.yourdomain.com;
+```
+
+Install Certbot and issue the certificate:
+
+```bash
+apt update
+apt install -y certbot python3-certbot-nginx
+certbot --nginx -d gpa.yourdomain.com
+nginx -t
+systemctl reload nginx
+certbot renew --dry-run
+```
+
+Then open:
+
+```text
+https://gpa.yourdomain.com/
+```
+
+Use Chrome or Edge for voice commands, and allow microphone permission when the browser asks.
+
 ## Update later
 
 ```bash
