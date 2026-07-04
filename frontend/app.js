@@ -543,16 +543,19 @@ function clientBlockers(clientId) {
 }
 
 function clientMessage(client, type) {
-  if (type === "notes") return client.notes.trim();
+  let subject = client.work_scope || "your pending work";
+
+  if (type === "notes") subject = client.notes.trim();
 
   if (type === "block") {
-    return clientBlockers(client.id)
+    subject = clientBlockers(client.id)
       .map((task) => task.issue || `${task.title} is blocked.`)
       .filter(Boolean)
-      .join("\n");
+      .join("; ");
   }
 
-  return `Hello ${client.name}, please submit required documents for ${client.work_scope || "your pending work"}.`;
+  if (!subject) return "";
+  return `Hello ${client.name}, please submit required documents for ${subject}.`;
 }
 
 function sendClientMessage(clientId, channel, source) {
