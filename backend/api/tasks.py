@@ -111,7 +111,15 @@ def now() -> datetime:
     return datetime.now()
 
 
-def log_activity(session: Session, action: str, entity_type: str, summary: str, entity_id: int | None = None, entity_uuid: str = ""):
+def log_activity(
+    session: Session,
+    action: str,
+    entity_type: str,
+    summary: str,
+    entity_id: int | None = None,
+    entity_uuid: str = "",
+    details: str = "",
+):
     session.add(
         ActivityLog(
             action=action,
@@ -119,8 +127,48 @@ def log_activity(session: Session, action: str, entity_type: str, summary: str, 
             entity_id=entity_id,
             entity_uuid=entity_uuid,
             summary=summary,
+            details=details,
         )
     )
+
+
+TASK_AUDIT_FIELDS = [
+    "title",
+    "description",
+    "category",
+    "priority",
+    "status",
+    "client_id",
+    "start_date",
+    "due_date",
+    "reminder",
+    "repeat_type",
+    "repeat_every",
+    "owner",
+    "issue",
+    "notes",
+    "archived",
+]
+
+
+def display_audit_value(value) -> str:
+    if value is None:
+        return "blank"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    text = str(value).strip()
+    return text or "blank"
+
+
+def task_change_details(task: Task, data: dict) -> str:
+    changes = []
+    for field in TASK_AUDIT_FIELDS:
+        old_value = getattr(task, field)
+        new_value = data.get(field)
+        if old_value != new_value:
+            label = field.replace("_", " ").title()
+            changes.append(f"{label}: {display_audit_value(old_value)} -> {display_audit_value(new_value)}")
+    return "; ".join(changes)
 
 
 def add_months(value: date, months: int) -> date:
@@ -179,15 +227,17 @@ def normalize_task_data(task_data: TaskCreate | TaskUpdate, session: Session) ->
     return data
 
 
-def apply_task_data(task: Task, task_data: TaskCreate | TaskUpdate, session: Session) -> Task:
-    for field, value in normalize_task_data(task_data, session).items():
+def apply_task_data(task: Task, task_data: TaskCreate | TaskUpdate, session: Session) -> tuple[Task, str]:
+    data = normalize_task_data(task_data, session)
+    changes = task_change_details(task, data)
+    for field, value in data.items():
         setattr(task, field, value)
     if task.status == "Completed" and task.completed_at is None:
         task.completed_at = now()
     if task.status != "Completed":
         task.completed_at = None
     task.updated_at = now()
-    return task
+    return task, changes
 
 
 def create_next_occurrence(task: Task) -> Task | None:
@@ -332,14 +382,19 @@ def client_message_subject(session: Session, client: Client, message_type: str) 
     if message_type == "notes":
         return client.notes.strip()
     if message_type == "block":
-        blockers = session.exec(
+        active_tasks_for_client = session.exec(
             select(Task).where(
                 Task.client_id == client.id,
                 Task.archived == False,  # noqa: E712
                 Task.status != "Completed",
             )
         ).all()
-        return "; ".join((task.issue or f"{task.title} is blocked.").strip() for task in blockers if task.status == "Blocked" or task.issue)
+        blockers = []
+        for task in active_tasks_for_client:
+            block_text = (task.issue or task.notes or "").strip()
+            if task.status == "Blocked" or block_text:
+                blockers.append(block_text or f"{task.title} is blocked.")
+        return "; ".join(blockers)
     return client.work_scope.strip() or "your pending work"
 
 
@@ -713,9 +768,9 @@ def create_task(task_data: TaskCreate, session: Session = Depends(get_session)):
 
 @router.put("/tasks/{task_id}")
 def update_task(task_id: int, task_data: TaskUpdate, session: Session = Depends(get_session)):
-    task = apply_task_data(get_task_or_404(task_id, session), task_data, session)
+    task, changes = apply_task_data(get_task_or_404(task_id, session), task_data, session)
     session.add(task)
-    log_activity(session, "UPDATED", "task", f"Updated task: {task.title}", task.id, task.uuid)
+    log_activity(session, "UPDATED", "task", f"Updated task: {task.title}", task.id, task.uuid, changes or "No field changes")
     session.commit()
     session.refresh(task)
     return task

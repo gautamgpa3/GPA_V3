@@ -13,4 +13,5 @@ class ActivityLog(SQLModel, table=True):
     entity_id: Optional[int] = None
     entity_uuid: str = ""
     summary: str
+    details: str = ""
     created_at: datetime = Field(default_factory=datetime.now)

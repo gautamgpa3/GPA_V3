@@ -566,6 +566,31 @@ button {
   resize: vertical;
 }
 
+.template-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.format-button {
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 14px;
+  height: 34px;
+  width: 34px;
+}
+
+.format-button.bold {
+  font-weight: 900;
+}
+
+.format-button.italic {
+  font-style: italic;
+}
+
+.format-button.strike {
+  text-decoration: line-through;
+}
+
 .variable-list {
   display: flex;
   flex-wrap: wrap;

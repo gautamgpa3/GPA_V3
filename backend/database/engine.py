@@ -46,6 +46,10 @@ TASK_COLUMNS = {
     "updated_at": "DATETIME",
 }
 
+ACTIVITY_COLUMNS = {
+    "details": "TEXT DEFAULT ''",
+}
+
 MESSAGE_TEMPLATES = [
     ("client_general", "Client general", "Hello {client_name}, please submit required documents for {work_scope}."),
     ("client_notes", "Client notes", "Hello {client_name}, please submit required documents for {notes}."),
@@ -61,6 +65,7 @@ MESSAGE_TEMPLATES = [
 def create_db():
     SQLModel.metadata.create_all(engine)
     migrate_task_table()
+    migrate_activity_table()
     seed_master_data()
     seed_message_templates()
 
@@ -89,6 +94,18 @@ def migrate_task_table():
         connection.execute(text("UPDATE tasks SET notes = '' WHERE notes IS NULL"))
         connection.execute(text("UPDATE tasks SET archived = 0 WHERE archived IS NULL"))
         connection.execute(text("UPDATE tasks SET telegram_sent = 0 WHERE telegram_sent IS NULL"))
+
+
+def migrate_activity_table():
+    with engine.begin() as connection:
+        existing = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(activity_logs)")).fetchall()
+        }
+        for column, definition in ACTIVITY_COLUMNS.items():
+            if column not in existing:
+                connection.execute(text(f"ALTER TABLE activity_logs ADD COLUMN {column} {definition}"))
+        connection.execute(text("UPDATE activity_logs SET details = '' WHERE details IS NULL"))
 
 
 def seed_master_data():

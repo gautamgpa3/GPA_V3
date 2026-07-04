@@ -277,7 +277,7 @@ async function loadMessageTemplates() {
 }
 
 async function loadActivity() {
-  const activity = await api(API_ACTIVITY_URL);
+  const activity = await api(`${API_ACTIVITY_URL}?limit=500`);
   state.activity = Array.isArray(activity) ? activity : [];
 }
 
@@ -606,7 +606,7 @@ function clientBlockers(clientId) {
       Number(task.client_id) === Number(clientId) &&
       !task.archived &&
       task.status !== "Completed" &&
-      (task.status === "Blocked" || task.issue)
+      (task.status === "Blocked" || task.issue || task.notes)
   );
 }
 
@@ -617,7 +617,7 @@ function clientMessage(client, type) {
 
   if (type === "block") {
     subject = clientBlockers(client.id)
-      .map((task) => task.issue || `${task.title} is blocked.`)
+      .map((task) => task.issue || task.notes || `${task.title} is blocked.`)
       .filter(Boolean)
       .join("; ");
   }
@@ -851,6 +851,25 @@ function templateVariableButtons(templateKey) {
     .join("");
 }
 
+function templateFormatToolbar(templateKey) {
+  const controls = [
+    ["bold", "B", "Bold"],
+    ["italic", "I", "Italic"],
+    ["strike", "S", "Strikethrough"],
+  ];
+  return `
+    <div class="template-toolbar" aria-label="Template formatting">
+      ${controls
+        .map(
+          ([format, label, title]) => `
+            <button class="icon-button format-button ${format}" data-action="format-template" data-key="${escapeHtml(templateKey)}" data-format="${format}" title="${title}" type="button">${label}</button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function messageTemplateList() {
   return `
     <div class="panel">
@@ -867,6 +886,7 @@ function messageTemplateList() {
                   <h3>${escapeHtml(template.name)}</h3>
                   <button class="secondary-button" data-action="save-template" data-key="${escapeHtml(template.key)}" type="button">Save</button>
                 </div>
+                ${templateFormatToolbar(template.key)}
                 <textarea data-template-body="${escapeHtml(template.key)}" rows="4">${escapeHtml(template.body)}</textarea>
                 <div class="variable-list" aria-label="Template variables">
                   ${templateVariableButtons(template.key)}
@@ -1177,15 +1197,39 @@ async function saveMessageTemplate(templateKey) {
 }
 
 function insertTemplateVariable(templateKey, variable) {
+  insertIntoTemplate(templateKey, variable);
+}
+
+function insertIntoTemplate(templateKey, value) {
   const selectorKey = window.CSS?.escape ? CSS.escape(templateKey) : templateKey;
   const field = document.querySelector(`[data-template-body="${selectorKey}"]`);
   if (!field) return;
   const start = field.selectionStart ?? field.value.length;
   const end = field.selectionEnd ?? field.value.length;
-  field.value = `${field.value.slice(0, start)}${variable}${field.value.slice(end)}`;
-  const nextPosition = start + variable.length;
+  field.value = `${field.value.slice(0, start)}${value}${field.value.slice(end)}`;
+  const nextPosition = start + value.length;
   field.focus();
   field.setSelectionRange(nextPosition, nextPosition);
+}
+
+function formatTemplateSelection(templateKey, format) {
+  const markers = {
+    bold: ["*", "*"],
+    italic: ["_", "_"],
+    strike: ["~", "~"],
+  };
+  const marker = markers[format];
+  if (!marker) return;
+  const selectorKey = window.CSS?.escape ? CSS.escape(templateKey) : templateKey;
+  const field = document.querySelector(`[data-template-body="${selectorKey}"]`);
+  if (!field) return;
+  const start = field.selectionStart ?? field.value.length;
+  const end = field.selectionEnd ?? field.value.length;
+  const selected = field.value.slice(start, end) || "text";
+  const replacement = `${marker[0]}${selected}${marker[1]}`;
+  field.value = `${field.value.slice(0, start)}${replacement}${field.value.slice(end)}`;
+  field.focus();
+  field.setSelectionRange(start + marker[0].length, start + marker[0].length + selected.length);
 }
 
 async function saveForm(event) {
@@ -1349,6 +1393,7 @@ function checkNotificationHints() {
 
 function exportCSV() {
   const headers = [
+    "Row Type",
     "ID",
     "UUID",
     "Title",
@@ -1375,11 +1420,18 @@ function exportCSV() {
     "Created At",
     "Updated At",
     "Completed At",
+    "Activity ID",
+    "Activity Action",
+    "Activity Entity",
+    "Activity Summary",
+    "Activity Details",
+    "Activity Time",
   ];
   const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const rows = state.tasks.map((task) => {
     const client = clientForTask(task);
     return [
+      "Task",
       task.id,
       task.uuid,
       task.title,
@@ -1406,11 +1458,69 @@ function exportCSV() {
       formatTimestamp(task.created_at),
       formatTimestamp(task.updated_at),
       formatTimestamp(task.completed_at),
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
     ]
       .map(csvCell)
       .join(",");
   });
-  const csv = [headers.map(csvCell).join(","), ...rows].join("\n");
+
+  const taskByActivityKey = new Map();
+  state.tasks.forEach((task) => {
+    if (task.id) taskByActivityKey.set(`id:${task.id}`, task);
+    if (task.uuid) taskByActivityKey.set(`uuid:${task.uuid}`, task);
+  });
+
+  const activityRows = state.activity.map((activity) => {
+    const task =
+      taskByActivityKey.get(`id:${activity.entity_id}`) ||
+      taskByActivityKey.get(`uuid:${activity.entity_uuid}`) ||
+      {};
+    const client = task.client_id ? clientForTask(task) : null;
+    return [
+      "Activity",
+      task.id || activity.entity_id,
+      task.uuid || activity.entity_uuid,
+      task.title || "",
+      task.description || "",
+      task.category || "",
+      task.priority || "",
+      task.status || "",
+      task.client_id || "",
+      client?.name,
+      client?.phone,
+      client?.whatsapp,
+      client?.gst_no,
+      client?.work_scope,
+      task.start_date || "",
+      task.due_date || "",
+      task.reminder === undefined ? "" : task.reminder ? "Yes" : "No",
+      task.repeat_type || "",
+      task.repeat_every || "",
+      task.owner || "",
+      task.issue || "",
+      task.notes || "",
+      task.archived === undefined ? "" : task.archived ? "Yes" : "No",
+      task.telegram_sent === undefined ? "" : task.telegram_sent ? "Yes" : "No",
+      task.created_at ? formatTimestamp(task.created_at) : "",
+      task.updated_at ? formatTimestamp(task.updated_at) : "",
+      task.completed_at ? formatTimestamp(task.completed_at) : "",
+      activity.id,
+      activity.action,
+      activity.entity_type,
+      activity.summary,
+      activity.details,
+      formatTimestamp(activity.created_at),
+    ]
+      .map(csvCell)
+      .join(",");
+  });
+
+  const csv = [headers.map(csvCell).join(","), ...rows, ...activityRows].join("\n");
   const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
@@ -1499,6 +1609,10 @@ function bindEvents() {
     }
     if (target.dataset.action === "insert-template-variable") {
       insertTemplateVariable(target.dataset.key, target.dataset.variable);
+      return;
+    }
+    if (target.dataset.action === "format-template") {
+      formatTemplateSelection(target.dataset.key, target.dataset.format);
       return;
     }
     const task = state.tasks.find((item) => String(item.id) === String(target.dataset.id));
