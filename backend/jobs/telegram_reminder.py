@@ -8,7 +8,7 @@ from urllib.request import Request, urlopen
 
 from sqlmodel import Session, select
 
-from backend.api.tasks import build_briefing, get_due_client_messages
+from backend.api.tasks import build_briefing, get_due_client_messages, message_template_body, render_template
 from backend.database.engine import create_db, engine
 from backend.models.activity import ActivityLog
 
@@ -55,8 +55,10 @@ def task_line(task) -> str:
 def build_message(session: Session) -> str:
     briefing = build_briefing(session)
     due_messages = get_due_client_messages(session)
+    opening_template = message_template_body(session, "telegram_daily", briefing["message"])
+    opening = render_template(opening_template, briefing)
     lines = [
-        briefing["message"],
+        opening,
         "",
         f"Due today: {briefing['due_today_count']}",
         f"Overdue: {briefing['overdue_count']}",

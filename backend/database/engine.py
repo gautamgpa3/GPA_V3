@@ -8,6 +8,7 @@ from backend.models.activity import ActivityLog
 from backend.models.client import Client
 from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
 from backend.models.message_schedule import ClientMessageSchedule
+from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
 
 engine = create_engine(
@@ -45,11 +46,23 @@ TASK_COLUMNS = {
     "updated_at": "DATETIME",
 }
 
+MESSAGE_TEMPLATES = [
+    ("client_general", "Client general", "Hello {client_name}, please submit required documents for {work_scope}."),
+    ("client_notes", "Client notes", "Hello {client_name}, please submit required documents for {notes}."),
+    ("client_block", "Client block", "Hello {client_name}, please submit required documents for {block}."),
+    (
+        "telegram_daily",
+        "Telegram daily summary",
+        "Good morning, Gautam. You have {pending_count} pending task(s), {meeting_count} meeting-related item(s), {bni_tomorrow_count} BNI item(s) tomorrow, and {overdue_count} overdue follow-up(s).",
+    ),
+]
+
 
 def create_db():
     SQLModel.metadata.create_all(engine)
     migrate_task_table()
     seed_master_data()
+    seed_message_templates()
 
 
 def migrate_task_table():
@@ -95,6 +108,16 @@ def seed_master_data():
                     exists.sort_order = index
                     exists.active = True
                     session.add(exists)
+        session.commit()
+
+
+def seed_message_templates():
+    with Session(engine) as session:
+        for key, name, body in MESSAGE_TEMPLATES:
+            exists = session.exec(select(MessageTemplate).where(MessageTemplate.key == key)).first()
+            if exists:
+                continue
+            session.add(MessageTemplate(key=key, name=name, body=body))
         session.commit()
 
 

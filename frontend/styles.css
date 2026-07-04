@@ -1,21 +1,21 @@
 :root {
   color-scheme: light;
-  --bg: #f6f7f9;
+  --bg: #f5f5f5;
   --panel: #ffffff;
-  --panel-2: #eef5f1;
-  --text: #17201b;
-  --muted: #69756f;
-  --line: #dfe6e2;
-  --green: #276b4b;
-  --green-2: #dff1e8;
-  --blue: #225f8f;
-  --blue-2: #e0edf7;
-  --red: #af3333;
-  --red-2: #f8e3e3;
-  --amber: #9a641d;
-  --amber-2: #f8ecd8;
-  --ink: #111827;
-  --shadow: 0 16px 40px rgba(25, 38, 32, 0.08);
+  --panel-2: #eeeeee;
+  --text: #111111;
+  --muted: #666666;
+  --line: #d8d8d8;
+  --green: #111111;
+  --green-2: #eeeeee;
+  --blue: #222222;
+  --blue-2: #f1f1f1;
+  --red: #111111;
+  --red-2: #eeeeee;
+  --amber: #333333;
+  --amber-2: #f4f4f4;
+  --ink: #000000;
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.08);
 }
 
 * {
@@ -53,7 +53,7 @@ button {
 }
 
 .sidebar {
-  background: #fbfcfb;
+  background: #ffffff;
   border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
@@ -74,7 +74,7 @@ button {
   align-items: center;
   background: var(--green);
   border-radius: 8px;
-  color: white;
+  color: #ffffff;
   display: grid;
   font-weight: 800;
   height: 46px;
@@ -142,7 +142,7 @@ button {
 .nav-item.active,
 .nav-item:hover {
   background: var(--green-2);
-  color: var(--green);
+  color: var(--text);
 }
 
 .sidebar-footer {
@@ -200,7 +200,7 @@ button {
 
 .primary-button {
   background: var(--green);
-  color: white;
+  color: #ffffff;
   padding: 0 16px;
 }
 
@@ -215,7 +215,7 @@ button {
 
 .danger-button {
   background: var(--red-2);
-  color: var(--red);
+  color: var(--text);
   padding: 0 14px;
 }
 
@@ -237,7 +237,7 @@ button {
 }
 
 .capture-input {
-  background: #f9fbfa;
+  background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 50px;
@@ -248,7 +248,7 @@ button {
   background: var(--red-2);
   border: 0;
   border-radius: 8px;
-  color: var(--red);
+  color: var(--text);
   display: grid;
   flex: 0 0 40px;
   height: 40px;
@@ -258,7 +258,7 @@ button {
 .mic-button.listening {
   animation: pulse 1s infinite;
   background: var(--red);
-  color: white;
+  color: #ffffff;
 }
 
 @keyframes pulse {
@@ -345,8 +345,27 @@ button {
   gap: 10px;
 }
 
+.template-list {
+  display: grid;
+  gap: 12px;
+}
+
+.template-card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.template-card textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
 .task-card {
-  background: #fff;
+  background: #ffffff;
   border: 1px solid var(--line);
   border-left: 5px solid var(--green);
   border-radius: 8px;
@@ -364,7 +383,7 @@ button {
 }
 
 .task-card.reminder-due {
-  box-shadow: inset 0 0 0 1px rgba(175, 51, 51, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.14);
 }
 
 .task-card.completed {
@@ -395,7 +414,7 @@ button {
 }
 
 .task-note {
-  background: #f8faf9;
+  background: #f7f7f7;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 9px;
@@ -419,22 +438,22 @@ button {
 
 .badge.green {
   background: var(--green-2);
-  color: var(--green);
+  color: var(--text);
 }
 
 .badge.blue {
   background: var(--blue-2);
-  color: var(--blue);
+  color: var(--text);
 }
 
 .badge.red {
   background: var(--red-2);
-  color: var(--red);
+  color: var(--text);
 }
 
 .badge.amber {
   background: var(--amber-2);
-  color: var(--amber);
+  color: var(--text);
 }
 
 .filters {
@@ -535,7 +554,7 @@ button {
 }
 
 .briefing-list div {
-  background: #f8faf9;
+  background: #f7f7f7;
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 10px;
@@ -619,7 +638,7 @@ button {
 }
 
 .bar {
-  background: #edf1ef;
+  background: #eeeeee;
   border-radius: 999px;
   height: 10px;
   margin: 8px 0 14px;
@@ -634,7 +653,7 @@ button {
 
 .empty-state {
   align-items: center;
-  border: 1px dashed #cdd8d1;
+  border: 1px dashed #cccccc;
   border-radius: 8px;
   color: var(--muted);
   display: grid;
@@ -702,7 +721,7 @@ label.full {
 label input,
 label select,
 label textarea {
-  background: #fbfcfb;
+  background: #ffffff;
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--text);
@@ -794,7 +813,7 @@ textarea {
   }
 
   .nav {
-    background: #fbfcfb;
+    background: #ffffff;
     border-top: 1px solid var(--line);
     bottom: 0;
     display: grid;

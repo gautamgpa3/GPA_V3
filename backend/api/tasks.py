@@ -11,6 +11,7 @@ from backend.models.activity import ActivityLog
 from backend.models.client import Client
 from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
 from backend.models.message_schedule import ClientMessageSchedule
+from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
 
 router = APIRouter(prefix="/api", tags=["Tasks"])
@@ -93,6 +94,11 @@ class MessageScheduleCreate(MessageScheduleBase):
 
 class MessageScheduleUpdate(MessageScheduleBase):
     pass
+
+
+class MessageTemplateUpdate(BaseModel):
+    body: str = Field(min_length=1, max_length=2000)
+    active: bool = True
 
 
 MASTER_MODELS = {
@@ -282,6 +288,20 @@ def normalize_schedule_data(schedule_data: MessageScheduleCreate | MessageSchedu
     return data
 
 
+def render_template(template: str, values: dict[str, object]) -> str:
+    result = template
+    for key, value in values.items():
+        result = result.replace(f"{{{key}}}", str("" if value is None else value))
+    return result.strip()
+
+
+def message_template_body(session: Session, key: str, fallback: str) -> str:
+    template = session.exec(
+        select(MessageTemplate).where(MessageTemplate.key == key, MessageTemplate.active == True)  # noqa: E712
+    ).first()
+    return template.body if template else fallback
+
+
 def schedule_client_ids(schedule: ClientMessageSchedule) -> list[int]:
     return [int(value) for value in schedule.client_ids.split(",") if value.strip().isdigit()]
 
@@ -327,7 +347,19 @@ def client_message_text(session: Session, client: Client, message_type: str) -> 
     subject = client_message_subject(session, client, message_type)
     if not subject:
         return ""
-    return f"Hello {client.name}, please submit required documents for {subject}."
+    key = f"client_{message_type}"
+    fallback = "Hello {client_name}, please submit required documents for {subject}."
+    template = message_template_body(session, key, fallback)
+    return render_template(
+        template,
+        {
+            "client_name": client.name,
+            "subject": subject,
+            "work_scope": subject,
+            "notes": subject,
+            "block": subject,
+        },
+    )
 
 
 def parse_assistant_date(text: str) -> date:
@@ -445,6 +477,26 @@ def get_master_data(session: Session = Depends(get_session)):
         "category_items": master_items(session, Category),
         "owner_items": master_items(session, Owner),
     }
+
+
+@router.get("/message-templates")
+def get_message_templates(session: Session = Depends(get_session)):
+    return session.exec(select(MessageTemplate).where(MessageTemplate.active == True).order_by(MessageTemplate.id)).all()  # noqa: E712
+
+
+@router.put("/message-templates/{template_key}")
+def update_message_template(template_key: str, template_data: MessageTemplateUpdate, session: Session = Depends(get_session)):
+    template = session.exec(select(MessageTemplate).where(MessageTemplate.key == template_key)).first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Message template not found")
+    template.body = template_data.body.strip()
+    template.active = template_data.active
+    template.updated_at = now()
+    session.add(template)
+    log_activity(session, "UPDATED", "message_template", f"Updated message template: {template.name}", template.id)
+    session.commit()
+    session.refresh(template)
+    return template
 
 
 @router.post("/master-data/{master_type}")

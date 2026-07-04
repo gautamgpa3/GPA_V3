@@ -3,6 +3,7 @@ const API_MASTER_DATA_URL = "/api/master-data";
 const API_CLIENTS_URL = "/api/clients";
 const API_MESSAGE_SCHEDULES_URL = "/api/client-message-schedules";
 const API_DUE_MESSAGES_URL = "/api/client-message-due";
+const API_MESSAGE_TEMPLATES_URL = "/api/message-templates";
 const API_ACTIVITY_URL = "/api/activity";
 const API_ASSISTANT_URL = "/api/assistant/command";
 const API_BRIEFING_URL = "/api/briefing";
@@ -14,6 +15,7 @@ const state = {
   clients: [],
   messageSchedules: [],
   dueMessages: [],
+  messageTemplates: [],
   activity: [],
   briefing: null,
   conversation: [],
@@ -252,6 +254,11 @@ async function loadMessageSchedules() {
 async function loadDueMessages() {
   const messages = await api(API_DUE_MESSAGES_URL);
   state.dueMessages = Array.isArray(messages) ? messages : [];
+}
+
+async function loadMessageTemplates() {
+  const templates = await api(API_MESSAGE_TEMPLATES_URL);
+  state.messageTemplates = Array.isArray(templates) ? templates : [];
 }
 
 async function loadActivity() {
@@ -596,7 +603,20 @@ function clientMessage(client, type) {
   }
 
   if (!subject) return "";
-  return `Hello ${client.name}, please submit required documents for ${subject}.`;
+  const template =
+    state.messageTemplates.find((item) => item.key === `client_${type}`)?.body ||
+    "Hello {client_name}, please submit required documents for {subject}.";
+  return renderMessageTemplate(template, {
+    client_name: client.name,
+    subject,
+    work_scope: subject,
+    notes: subject,
+    block: subject,
+  });
+}
+
+function renderMessageTemplate(template, values) {
+  return Object.entries(values).reduce((message, [key, value]) => message.split(`{${key}}`).join(value ?? ""), template).trim();
 }
 
 function sendClientMessage(clientId, channel, source) {
@@ -773,12 +793,41 @@ function masterList(title, type, items) {
   `;
 }
 
+function messageTemplateList() {
+  const placeholders = "{client_name}, {subject}, {work_scope}, {notes}, {block}, {pending_count}, {due_today_count}, {overdue_count}, {meeting_count}, {bni_tomorrow_count}";
+  return `
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Message templates</h3>
+        <span class="mini">${state.messageTemplates.length} editable</span>
+      </div>
+      <p class="task-meta">Placeholders: ${escapeHtml(placeholders)}</p>
+      <div class="template-list">
+        ${state.messageTemplates
+          .map(
+            (template) => `
+              <article class="template-card">
+                <div class="panel-head">
+                  <h3>${escapeHtml(template.name)}</h3>
+                  <button class="secondary-button" data-action="save-template" data-key="${escapeHtml(template.key)}" type="button">Save</button>
+                </div>
+                <textarea data-template-body="${escapeHtml(template.key)}" rows="4">${escapeHtml(template.body)}</textarea>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+}
+
 function renderSettings() {
   els.views.settings.innerHTML = `
     <div class="report-grid">
       ${masterList("Categories", "categories", state.master.category_items || [])}
       ${masterList("Assigned to / staff", "owners", state.master.owner_items || [])}
     </div>
+    ${messageTemplateList()}
   `;
 }
 
@@ -1047,6 +1096,27 @@ async function deleteMasterFromDialog() {
   render();
 }
 
+async function saveMessageTemplate(templateKey) {
+  const selectorKey = window.CSS?.escape ? CSS.escape(templateKey) : templateKey;
+  const field = document.querySelector(`[data-template-body="${selectorKey}"]`);
+  const template = state.messageTemplates.find((item) => item.key === templateKey);
+  if (!field || !template) return;
+  const body = field.value.trim();
+  if (!body) {
+    window.alert("Message template cannot be blank.");
+    return;
+  }
+  if (!window.confirm(`Save message template "${template.name}"?`)) return;
+  await api(`${API_MESSAGE_TEMPLATES_URL}/${templateKey}`, {
+    method: "PUT",
+    body: JSON.stringify({ body, active: true }),
+  });
+  await loadMessageTemplates();
+  await loadDueMessages();
+  await loadActivity();
+  render();
+}
+
 async function saveForm(event) {
   event.preventDefault();
   const payload = readForm();
@@ -1309,6 +1379,10 @@ function bindEvents() {
       });
       return;
     }
+    if (target.dataset.action === "save-template") {
+      saveMessageTemplate(target.dataset.key);
+      return;
+    }
     const task = state.tasks.find((item) => String(item.id) === String(target.dataset.id));
     if (!task) return;
     if (target.dataset.action === "edit") openTaskDialog(task);
@@ -1331,6 +1405,7 @@ function bindEvents() {
 async function init() {
   try {
     await loadMasterData();
+    await loadMessageTemplates();
     await loadClients();
     populateMasterControls();
     await loadTasks();
