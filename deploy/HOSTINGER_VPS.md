@@ -126,10 +126,11 @@ Create a Telegram bot with BotFather and copy the bot token. Send one message to
 curl "https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates"
 ```
 
-Edit GPA environment:
+Keep Telegram credentials outside the Git repository in a server-only secrets file:
 
 ```bash
-nano /opt/gpa-v3/app/.env
+mkdir -p /opt/gpa-v3/secrets
+nano /opt/gpa-v3/secrets/telegram.env
 ```
 
 Set:
@@ -137,6 +138,26 @@ Set:
 ```env
 TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
 TELEGRAM_CHAT_ID=YOUR_CHAT_ID
+```
+
+Lock the file so only root and the `gpa` service user can read it:
+
+```bash
+chown -R gpa:gpa /opt/gpa-v3/secrets
+chmod 700 /opt/gpa-v3/secrets
+chmod 600 /opt/gpa-v3/secrets/telegram.env
+```
+
+Point GPA to that secrets file:
+
+```bash
+nano /opt/gpa-v3/app/.env
+```
+
+Add:
+
+```env
+GPA_TELEGRAM_SECRETS_FILE=/opt/gpa-v3/secrets/telegram.env
 ```
 
 Install and start the daily reminder timer:

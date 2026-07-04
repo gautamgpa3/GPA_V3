@@ -14,10 +14,11 @@ from backend.models.activity import ActivityLog
 
 
 REMINDER_ENTITY = "telegram_daily_reminder"
+DEFAULT_TELEGRAM_SECRETS_FILE = "/opt/gpa-v3/secrets/telegram.env"
 
 
-def load_dotenv_file() -> None:
-    env_path = Path(".env")
+def load_env_file(path: str | Path) -> None:
+    env_path = Path(path)
     if not env_path.exists():
         return
     for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -26,6 +27,12 @@ def load_dotenv_file() -> None:
             continue
         key, value = stripped.split("=", 1)
         os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def load_environment() -> None:
+    load_env_file(".env")
+    secrets_file = os.getenv("GPA_TELEGRAM_SECRETS_FILE", DEFAULT_TELEGRAM_SECRETS_FILE)
+    load_env_file(secrets_file)
 
 
 def already_sent_today(session: Session, today: date) -> bool:
@@ -95,7 +102,7 @@ def send_telegram_message(token: str, chat_id: str, message: str) -> None:
 
 
 def run(force: bool = False, dry_run: bool = False) -> str:
-    load_dotenv_file()
+    load_environment()
     create_db()
     today = date.today()
     with Session(engine) as session:
