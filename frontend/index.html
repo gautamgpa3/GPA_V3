@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#276b4b" />
+    <meta name="theme-color" content="#0b0b0d" />
     <meta name="description" content="GPA V3 personal work assistant" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="apple-touch-icon" href="icon.svg" />
@@ -46,9 +46,10 @@
         </nav>
 
         <div class="sidebar-footer">
-          <button class="icon-button wide" id="notificationBtn" title="Enable browser reminders">
-            <span aria-hidden="true">!</span><span>Enable reminders</span>
+          <button class="icon-button wide" id="notificationBtn" title="Allow browser pop-up alerts while GPA is open">
+            <span aria-hidden="true">!</span><span>Browser alerts</span>
           </button>
+          <p class="sidebar-note">Only for browser pop-up alerts. Telegram reminders run separately from the VPS.</p>
           <button class="icon-button wide" id="exportBtn" title="Export all tasks to CSV">
             <span aria-hidden="true">CSV</span><span>Export CSV</span>
           </button>

@@ -1450,8 +1450,16 @@ function bindEvents() {
     render();
   });
   els.notificationBtn.addEventListener("click", async () => {
-    if (!("Notification" in window)) return;
-    await Notification.requestPermission();
+    if (!("Notification" in window)) {
+      window.alert("This browser does not support browser alerts. Telegram daily reminders will still work from the VPS.");
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      window.alert("Browser alerts are enabled. They work only while this browser allows GPA notifications. Telegram reminders are separate and run from the VPS.");
+    } else {
+      window.alert("Browser alerts were not enabled. You can still receive Telegram reminders if the Telegram timer is configured on the VPS.");
+    }
     checkNotificationHints();
   });
   els.exportBtn.addEventListener("click", exportCSV);
