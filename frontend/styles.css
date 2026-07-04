@@ -1,25 +1,28 @@
 :root {
   color-scheme: light;
-  --bg: #f3f3f4;
-  --panel: #ffffff;
-  --panel-2: #f4f4f5;
-  --text: #111114;
-  --muted: #6a6a72;
-  --line: #dedee3;
+  --bg: #08080a;
+  --panel: #151519;
+  --panel-2: #222228;
+  --text: #f6f6f7;
+  --muted: #b8b8c0;
+  --line: #32323a;
   --green: #c9162d;
   --green-2: #fff0f2;
   --blue: #0b0b0d;
-  --blue-2: #f1f1f3;
+  --blue-2: #23232a;
   --red: #c9162d;
   --red-2: #ffe8ec;
   --amber: #5b101a;
-  --amber-2: #f8edf0;
-  --ink: #050506;
+  --amber-2: #301820;
+  --ink: #ffffff;
   --dark: #0b0b0d;
   --dark-2: #151518;
   --accent: #e11937;
   --accent-deep: #8f1020;
-  --shadow: 0 18px 48px rgba(9, 9, 12, 0.14);
+  --card: #1b1b20;
+  --card-2: #24242b;
+  --control: #101014;
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
 }
 
 * {
@@ -34,8 +37,8 @@ body {
 body {
   margin: 0;
   background:
-    linear-gradient(115deg, rgba(201, 22, 45, 0.07), transparent 28%),
-    repeating-linear-gradient(135deg, rgba(9, 9, 12, 0.035) 0 1px, transparent 1px 18px),
+    radial-gradient(circle at 12% 10%, rgba(225, 25, 55, 0.18), transparent 30%),
+    linear-gradient(120deg, #070708, #151519 48%, #250a12),
     var(--bg);
   color: var(--text);
   font-family: "Aptos Display", "Segoe UI Variable Display", "Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -211,6 +214,22 @@ button {
   position: absolute;
 }
 
+.main::after {
+  animation: floatBars 16s ease-in-out infinite alternate;
+  background:
+    linear-gradient(180deg, rgba(225, 25, 55, 0.36), transparent),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent);
+  clip-path: polygon(0 0, 100% 10%, 92% 100%, 8% 90%);
+  content: "";
+  height: 220px;
+  opacity: 0.28;
+  pointer-events: none;
+  position: absolute;
+  right: 34px;
+  top: 128px;
+  width: 54px;
+}
+
 .topbar {
   align-items: center;
   display: flex;
@@ -276,7 +295,7 @@ button {
 .secondary-button,
 .icon-button,
 .chip {
-  background: var(--panel);
+  background: var(--card-2);
   border-color: var(--line);
   color: var(--text);
   padding: 0 14px;
@@ -369,6 +388,33 @@ button {
   }
 }
 
+@keyframes dataDrift {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 260px 0;
+  }
+}
+
+@keyframes floatBars {
+  from {
+    transform: translateY(0) skewX(-10deg);
+  }
+  to {
+    transform: translateY(34px) skewX(-10deg);
+  }
+}
+
+@keyframes statusFlow {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
 .chips {
   flex-wrap: wrap;
   margin-top: 10px;
@@ -399,6 +445,23 @@ button {
   z-index: 1;
 }
 
+.active-view::before {
+  animation: dataDrift 18s linear infinite;
+  background:
+    linear-gradient(90deg, transparent, rgba(225, 25, 55, 0.12), transparent),
+    repeating-linear-gradient(90deg, transparent 0 38px, rgba(255, 255, 255, 0.045) 38px 40px);
+  content: "";
+  inset: 0;
+  opacity: 0.55;
+  pointer-events: none;
+  position: absolute;
+}
+
+.active-view > * {
+  position: relative;
+  z-index: 1;
+}
+
 .metric-grid {
   display: grid;
   gap: 10px;
@@ -407,11 +470,25 @@ button {
 }
 
 .metric {
-  background: var(--panel);
+  background: linear-gradient(155deg, var(--card), #111116);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
+  overflow: hidden;
   padding: 14px;
+  position: relative;
+}
+
+.metric::before,
+.panel::before {
+  animation: statusFlow 7s linear infinite;
+  background: linear-gradient(90deg, transparent, rgba(225, 25, 55, 0.75), transparent);
+  content: "";
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
 }
 
 .metric span {
@@ -437,11 +514,13 @@ button {
 }
 
 .panel {
-  background: var(--panel);
+  background: linear-gradient(155deg, var(--card), #121217);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 12px 34px rgba(9, 9, 12, 0.06);
+  overflow: hidden;
   padding: 14px;
+  position: relative;
 }
 
 .panel-head {
@@ -469,7 +548,7 @@ button {
 }
 
 .template-card {
-  background: var(--panel);
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
   display: grid;
@@ -478,7 +557,12 @@ button {
 }
 
 .template-card textarea {
+  background: var(--control);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
   min-height: 96px;
+  padding: 9px 10px;
   resize: vertical;
 }
 
@@ -505,7 +589,7 @@ button {
 }
 
 .task-card {
-  background: #ffffff;
+  background: linear-gradient(155deg, var(--card), #111116);
   border: 1px solid var(--line);
   border-left: 5px solid var(--dark);
   border-radius: 8px;
@@ -555,7 +639,7 @@ button {
 }
 
 .task-note {
-  background: #f7f7f7;
+  background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px;
@@ -584,7 +668,7 @@ button {
 
 .badge.blue {
   background: var(--blue-2);
-  color: var(--text);
+  color: #ffffff;
 }
 
 .badge.red {
@@ -594,7 +678,7 @@ button {
 
 .badge.amber {
   background: var(--amber-2);
-  color: var(--text);
+  color: #ffffff;
 }
 
 .filters {
@@ -606,8 +690,9 @@ button {
 
 .filters select,
 .filters input {
-  background: var(--panel);
+  background: var(--control);
   border: 1px solid var(--line);
+  color: var(--text);
   border-radius: 8px;
   min-height: 40px;
   padding: 0 10px;
@@ -620,7 +705,7 @@ button {
 }
 
 .day-cell {
-  background: var(--panel);
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 120px;
@@ -640,7 +725,7 @@ button {
 .day-task {
   background: var(--panel-2);
   border-radius: 6px;
-  color: var(--accent-deep);
+  color: #ffffff;
   display: block;
   font-size: 12px;
   margin-top: 6px;
@@ -657,7 +742,7 @@ button {
 }
 
 .board-column {
-  background: var(--panel);
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 320px;
@@ -676,7 +761,7 @@ button {
 }
 
 .report-card {
-  background: var(--panel);
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 16px;
@@ -695,7 +780,7 @@ button {
 }
 
 .briefing-list div {
-  background: #f7f7f7;
+  background: var(--card-2);
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 9px;
@@ -718,7 +803,7 @@ button {
 }
 
 .client-card {
-  background: var(--panel);
+  background: var(--card);
   border: 1px solid var(--line);
   border-radius: 8px;
   display: grid;
@@ -779,7 +864,7 @@ button {
 }
 
 .bar {
-  background: #eeeeee;
+  background: #2b2b32;
   border-radius: 999px;
   height: 10px;
   margin: 8px 0 14px;
@@ -794,7 +879,7 @@ button {
 
 .empty-state {
   align-items: center;
-  border: 1px dashed #cccccc;
+  border: 1px dashed #4a4a54;
   border-radius: 8px;
   color: var(--muted);
   display: grid;
@@ -806,16 +891,18 @@ button {
 }
 
 dialog {
+  background: var(--card);
   border: 0;
   border-radius: 8px;
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.24);
   max-width: min(860px, calc(100vw - 24px));
   padding: 0;
   width: 860px;
+  color: var(--text);
 }
 
 dialog::backdrop {
-  background: rgba(20, 29, 24, 0.48);
+  background: rgba(0, 0, 0, 0.68);
 }
 
 .task-form {
@@ -862,13 +949,23 @@ label.full {
 label input,
 label select,
 label textarea {
-  background: #ffffff;
+  background: var(--control);
   border: 1px solid var(--line);
   border-radius: 8px;
   color: var(--text);
   min-height: 42px;
   padding: 9px 10px;
   text-transform: none;
+}
+
+label input::placeholder,
+label textarea::placeholder {
+  color: #858590;
+}
+
+select option {
+  background: var(--control);
+  color: var(--text);
 }
 
 textarea {
