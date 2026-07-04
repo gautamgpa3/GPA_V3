@@ -97,7 +97,6 @@ const els = {
     address: document.querySelector("#clientAddress"),
     gst_no: document.querySelector("#clientGst"),
     work_scope: document.querySelector("#clientWorkScope"),
-    notes: document.querySelector("#clientNotes"),
   },
   scheduleFields: {
     id: document.querySelector("#scheduleId"),
@@ -610,10 +609,25 @@ function clientBlockers(clientId) {
   );
 }
 
+function clientTaskNotes(clientId) {
+  return state.tasks.filter(
+    (task) =>
+      Number(task.client_id) === Number(clientId) &&
+      !task.archived &&
+      task.status !== "Completed" &&
+      task.notes
+  );
+}
+
 function clientMessage(client, type) {
   let subject = client.work_scope || "your pending work";
 
-  if (type === "notes") subject = client.notes.trim();
+  if (type === "notes") {
+    subject = clientTaskNotes(client.id)
+      .map((task) => task.notes.trim())
+      .filter(Boolean)
+      .join("; ");
+  }
 
   if (type === "block") {
     subject = clientBlockers(client.id)
@@ -757,6 +771,7 @@ function renderClients() {
         ${state.clients
           .map((client) => {
             const blockers = clientBlockers(client.id);
+            const taskNotes = clientTaskNotes(client.id);
             return `
               <article class="client-card">
                 <div class="task-row">
@@ -768,7 +783,7 @@ function renderClients() {
                 <div class="task-note">${escapeHtml(client.work_scope || "No work scope recorded")}</div>
                 <div class="badges">
                   ${client.address ? createBadge("Address saved", "blue") : ""}
-                  ${client.notes ? createBadge("Notes", "green") : ""}
+                  ${taskNotes.length ? createBadge(`${taskNotes.length} Notes`, "green") : ""}
                   ${blockers.length ? createBadge(`${blockers.length} Block`, "red") : ""}
                 </div>
                 <label class="message-select">
@@ -821,7 +836,7 @@ const TEMPLATE_VARIABLES = {
   ],
   client_notes: [
     ["client_name", "Client name"],
-    ["notes", "Client notes"],
+    ["notes", "Active task notes"],
     ["subject", "Selected message subject"],
   ],
   client_block: [
@@ -1003,7 +1018,6 @@ function openClientDialog(client = null) {
     address: "",
     gst_no: "",
     work_scope: "",
-    notes: "",
   };
   const data = { ...defaults, ...(client || {}) };
   Object.entries(els.clientFields).forEach(([key, field]) => {
@@ -1020,7 +1034,6 @@ function readClientForm() {
     address: els.clientFields.address.value.trim(),
     gst_no: els.clientFields.gst_no.value.trim(),
     work_scope: els.clientFields.work_scope.value.trim(),
-    notes: els.clientFields.notes.value.trim(),
     active: true,
   };
 }

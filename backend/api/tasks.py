@@ -380,7 +380,14 @@ def schedule_is_due(schedule: ClientMessageSchedule, at_time: datetime) -> bool:
 
 def client_message_subject(session: Session, client: Client, message_type: str) -> str:
     if message_type == "notes":
-        return client.notes.strip()
+        tasks = session.exec(
+            select(Task).where(
+                Task.client_id == client.id,
+                Task.archived == False,  # noqa: E712
+                Task.status != "Completed",
+            )
+        ).all()
+        return "; ".join(task.notes.strip() for task in tasks if task.notes.strip())
     if message_type == "block":
         active_tasks_for_client = session.exec(
             select(Task).where(

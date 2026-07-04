@@ -52,7 +52,7 @@ ACTIVITY_COLUMNS = {
 
 MESSAGE_TEMPLATES = [
     ("client_general", "Client general", "Hello {client_name}, please submit required documents for {work_scope}."),
-    ("client_notes", "Client notes", "Hello {client_name}, please submit required documents for {notes}."),
+    ("client_notes", "Task notes", "Hello {client_name}, please submit required documents for {notes}."),
     ("client_block", "Client block", "Hello {client_name}, please submit required documents for {block}."),
     (
         "telegram_daily",
@@ -133,6 +133,8 @@ def seed_message_templates():
         for key, name, body in MESSAGE_TEMPLATES:
             exists = session.exec(select(MessageTemplate).where(MessageTemplate.key == key)).first()
             if exists:
+                exists.name = name
+                session.add(exists)
                 continue
             session.add(MessageTemplate(key=key, name=name, body=body))
         session.commit()
