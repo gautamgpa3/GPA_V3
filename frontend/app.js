@@ -167,9 +167,22 @@ function formatDate(iso) {
 
 function formatTimestamp(value) {
   if (!value) return "";
-  const parsed = new Date(value);
+  const text = String(value);
+  const localMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/);
+  if (localMatch) {
+    const [, year, month, day, hour, minute] = localMatch;
+    const monthName = new Intl.DateTimeFormat("en-IN", { month: "short", timeZone: LOCAL_TIME_ZONE }).format(
+      new Date(Number(year), Number(month) - 1, 1)
+    );
+    const hourNumber = Number(hour);
+    const displayHour = hourNumber % 12 || 12;
+    const period = hourNumber >= 12 ? "PM" : "AM";
+    return `${day} ${monthName} ${year}, ${displayHour}:${minute} ${period}`;
+  }
+
+  const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleString(undefined, {
+  return parsed.toLocaleString("en-IN", {
     dateStyle: "medium",
     timeStyle: "short",
     timeZone: LOCAL_TIME_ZONE,
@@ -197,6 +210,7 @@ function boardGroups() {
 function normalizeTask(task) {
   return {
     id: task.id,
+    uuid: task.uuid || "",
     title: task.title || "",
     description: task.description || "",
     category: task.category || "Client",
@@ -215,6 +229,7 @@ function normalizeTask(task) {
     updated_at: task.updated_at || "",
     completed_at: task.completed_at || "",
     archived: Boolean(task.archived),
+    telegram_sent: Boolean(task.telegram_sent),
   };
 }
 
@@ -277,6 +292,11 @@ function optionTags(values, selected = "") {
 function clientName(clientId) {
   if (!clientId) return "";
   return state.clients.find((client) => Number(client.id) === Number(clientId))?.name || "";
+}
+
+function clientForTask(task) {
+  if (!task.client_id) return null;
+  return state.clients.find((client) => Number(client.id) === Number(task.client_id)) || null;
 }
 
 function phoneDigits(value = "") {
@@ -1328,27 +1348,70 @@ function checkNotificationHints() {
 }
 
 function exportCSV() {
-  const headers = ["Title", "Category", "Priority", "Status", "Start", "Due", "Repeat", "Owner", "Issue", "Notes", "Created", "Updated", "Completed"];
-  const rows = state.tasks.map((task) =>
-    [
+  const headers = [
+    "ID",
+    "UUID",
+    "Title",
+    "Description",
+    "Category",
+    "Priority",
+    "Status",
+    "Client ID",
+    "Client Name",
+    "Client Mobile",
+    "Client WhatsApp",
+    "Client GST No.",
+    "Client Work Scope",
+    "Start Date",
+    "Due Date",
+    "Reminder",
+    "Repeat Type",
+    "Repeat Every",
+    "Owner / Assigned To",
+    "Issue / Block",
+    "Notes",
+    "Archived",
+    "Telegram Sent",
+    "Created At",
+    "Updated At",
+    "Completed At",
+  ];
+  const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+  const rows = state.tasks.map((task) => {
+    const client = clientForTask(task);
+    return [
+      task.id,
+      task.uuid,
       task.title,
+      task.description,
       task.category,
       task.priority,
       task.status,
+      task.client_id,
+      client?.name,
+      client?.phone,
+      client?.whatsapp,
+      client?.gst_no,
+      client?.work_scope,
       task.start_date,
       task.due_date,
+      task.reminder ? "Yes" : "No",
       task.repeat_type,
+      task.repeat_every,
       task.owner,
       task.issue,
       task.notes,
+      task.archived ? "Yes" : "No",
+      task.telegram_sent ? "Yes" : "No",
       formatTimestamp(task.created_at),
       formatTimestamp(task.updated_at),
       formatTimestamp(task.completed_at),
     ]
-      .map((value) => `"${String(value || "").replace(/"/g, '""')}"`)
-      .join(",")
-  );
-  const blob = new Blob([[headers.join(","), ...rows].join("\n")], { type: "text/csv" });
+      .map(csvCell)
+      .join(",");
+  });
+  const csv = [headers.map(csvCell).join(","), ...rows].join("\n");
+  const blob = new Blob([`\ufeff${csv}`], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
