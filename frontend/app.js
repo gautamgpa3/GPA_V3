@@ -532,6 +532,54 @@ function renderReports() {
   `;
 }
 
+function clientBlockers(clientId) {
+  return state.tasks.filter(
+    (task) =>
+      Number(task.client_id) === Number(clientId) &&
+      !task.archived &&
+      task.status !== "Completed" &&
+      (task.status === "Blocked" || task.issue)
+  );
+}
+
+function clientMessage(client, type) {
+  if (type === "notes") return client.notes.trim();
+
+  if (type === "block") {
+    return clientBlockers(client.id)
+      .map((task) => task.issue || `${task.title} is blocked.`)
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  return `Hello ${client.name}, please submit required documents for ${client.work_scope || "your pending work"}.`;
+}
+
+function sendClientMessage(clientId, channel, source) {
+  const client = state.clients.find((item) => Number(item.id) === Number(clientId));
+  if (!client) return;
+
+  const phone = phoneDigits(channel === "whatsapp" ? client.whatsapp || client.phone : client.phone);
+  if (!phone) {
+    window.alert(`No ${channel === "whatsapp" ? "WhatsApp" : "SMS"} number saved for ${client.name}.`);
+    return;
+  }
+
+  const type = source.closest(".client-card")?.querySelector("[data-message-type]")?.value || "general";
+  const message = clientMessage(client, type);
+  if (!message) {
+    window.alert(`${client.name} has no ${type === "notes" ? "notes" : "block"} message saved yet.`);
+    return;
+  }
+
+  const encoded = encodeURIComponent(message);
+  if (channel === "whatsapp") {
+    window.open(`https://wa.me/${phone}?text=${encoded}`, "_blank", "noopener,noreferrer");
+    return;
+  }
+  window.location.href = `sms:${phone}?body=${encoded}`;
+}
+
 function renderClients() {
   els.views.clients.innerHTML = `
     <div class="panel">
@@ -542,9 +590,7 @@ function renderClients() {
       <div class="client-grid">
         ${state.clients
           .map((client) => {
-            const whatsapp = phoneDigits(client.whatsapp || client.phone);
-            const sms = phoneDigits(client.phone);
-            const message = encodeURIComponent(`Hello ${client.name}, please submit required documents for ${client.work_scope || "your pending work"}.`);
+            const blockers = clientBlockers(client.id);
             return `
               <article class="client-card">
                 <div class="task-row">
@@ -557,10 +603,19 @@ function renderClients() {
                 <div class="badges">
                   ${client.address ? createBadge("Address saved", "blue") : ""}
                   ${client.notes ? createBadge("Notes", "green") : ""}
+                  ${blockers.length ? createBadge(`${blockers.length} Block`, "red") : ""}
                 </div>
+                <label class="message-select">
+                  <span>Message</span>
+                  <select data-message-type>
+                    <option value="general">General</option>
+                    <option value="notes">Notes</option>
+                    <option value="block">Block</option>
+                  </select>
+                </label>
                 <div class="inline-actions">
-                  <a class="secondary-button link-button" href="https://wa.me/${whatsapp}?text=${message}" target="_blank" rel="noreferrer">WhatsApp</a>
-                  <a class="secondary-button link-button" href="sms:${sms}?body=${message}">SMS</a>
+                  <button class="secondary-button link-button" data-action="client-message" data-channel="whatsapp" data-id="${client.id}" type="button">WhatsApp</button>
+                  <button class="secondary-button link-button" data-action="client-message" data-channel="sms" data-id="${client.id}" type="button">SMS</button>
                 </div>
               </article>
             `;
@@ -1013,6 +1068,10 @@ function bindEvents() {
     if (target.dataset.action === "edit-client") {
       const client = state.clients.find((item) => String(item.id) === String(target.dataset.id));
       if (client) openClientDialog(client);
+      return;
+    }
+    if (target.dataset.action === "client-message") {
+      sendClientMessage(target.dataset.id, target.dataset.channel, target);
       return;
     }
     if (target.dataset.action === "add-master") {

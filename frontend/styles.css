@@ -572,6 +572,19 @@ button {
   gap: 8px;
 }
 
+.message-select {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+}
+
+.message-select span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .link-button {
   align-items: center;
   display: inline-flex;
