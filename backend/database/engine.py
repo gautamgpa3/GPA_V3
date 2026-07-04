@@ -7,6 +7,7 @@ from backend.core.config import DATABASE_URL
 from backend.models.activity import ActivityLog
 from backend.models.client import Client
 from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
+from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.task import Task
 
 engine = create_engine(

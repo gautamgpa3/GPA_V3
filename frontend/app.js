@@ -1,6 +1,8 @@
 const API_TASKS_URL = "/api/tasks";
 const API_MASTER_DATA_URL = "/api/master-data";
 const API_CLIENTS_URL = "/api/clients";
+const API_MESSAGE_SCHEDULES_URL = "/api/client-message-schedules";
+const API_DUE_MESSAGES_URL = "/api/client-message-due";
 const API_ACTIVITY_URL = "/api/activity";
 const API_ASSISTANT_URL = "/api/assistant/command";
 const API_BRIEFING_URL = "/api/briefing";
@@ -10,6 +12,8 @@ const LOCAL_TIME_ZONE = "Asia/Kolkata";
 const state = {
   tasks: [],
   clients: [],
+  messageSchedules: [],
+  dueMessages: [],
   activity: [],
   briefing: null,
   conversation: [],
@@ -58,6 +62,10 @@ const els = {
   clientForm: document.querySelector("#clientForm"),
   clientDialogTitle: document.querySelector("#clientDialogTitle"),
   deleteClientBtn: document.querySelector("#deleteClientBtn"),
+  scheduleDialog: document.querySelector("#scheduleDialog"),
+  scheduleForm: document.querySelector("#scheduleForm"),
+  scheduleDialogTitle: document.querySelector("#scheduleDialogTitle"),
+  deleteScheduleBtn: document.querySelector("#deleteScheduleBtn"),
   masterDialog: document.querySelector("#masterDialog"),
   masterForm: document.querySelector("#masterForm"),
   masterDialogTitle: document.querySelector("#masterDialogTitle"),
@@ -88,6 +96,19 @@ const els = {
     gst_no: document.querySelector("#clientGst"),
     work_scope: document.querySelector("#clientWorkScope"),
     notes: document.querySelector("#clientNotes"),
+  },
+  scheduleFields: {
+    id: document.querySelector("#scheduleId"),
+    name: document.querySelector("#scheduleName"),
+    message_type: document.querySelector("#scheduleMessageType"),
+    channel: document.querySelector("#scheduleChannel"),
+    audience: document.querySelector("#scheduleAudience"),
+    cadence: document.querySelector("#scheduleCadence"),
+    day_of_week: document.querySelector("#scheduleDayOfWeek"),
+    day_of_month: document.querySelector("#scheduleDayOfMonth"),
+    send_time: document.querySelector("#scheduleTime"),
+    client_ids: document.querySelector("#scheduleClients"),
+    active: document.querySelector("#scheduleActive"),
   },
   masterFields: {
     type: document.querySelector("#masterType"),
@@ -223,6 +244,16 @@ async function loadClients() {
   state.clients = Array.isArray(clients) ? clients : [];
 }
 
+async function loadMessageSchedules() {
+  const schedules = await api(API_MESSAGE_SCHEDULES_URL);
+  state.messageSchedules = Array.isArray(schedules) ? schedules : [];
+}
+
+async function loadDueMessages() {
+  const messages = await api(API_DUE_MESSAGES_URL);
+  state.dueMessages = Array.isArray(messages) ? messages : [];
+}
+
 async function loadActivity() {
   const activity = await api(API_ACTIVITY_URL);
   state.activity = Array.isArray(activity) ? activity : [];
@@ -245,6 +276,13 @@ function phoneDigits(value = "") {
   return String(value).replace(/[^\d]/g, "");
 }
 
+function populateScheduleClients(selectedIds = []) {
+  const selected = new Set(selectedIds.map(Number));
+  els.scheduleFields.client_ids.innerHTML = state.clients
+    .map((client) => `<option value="${client.id}" ${selected.has(Number(client.id)) ? "selected" : ""}>${escapeHtml(client.name)}</option>`)
+    .join("");
+}
+
 function populateMasterControls() {
   els.fields.category.innerHTML = optionTags(state.master.categories);
   els.fields.priority.innerHTML = optionTags(state.master.priorities);
@@ -254,6 +292,7 @@ function populateMasterControls() {
   els.fields.client_id.innerHTML = `<option value="">No client</option>${state.clients
     .map((client) => `<option value="${client.id}">${escapeHtml(client.name)}</option>`)
     .join("")}`;
+  populateScheduleClients();
 }
 
 function taskDerived(task) {
@@ -303,6 +342,7 @@ async function completeTask(task) {
   if (!window.confirm(`Mark "${task.title}" as completed?`)) return;
   await api(`${API_TASKS_URL}/${task.id}/complete`, { method: "PUT" });
   await loadTasks();
+  await loadDueMessages();
   await loadActivity();
   render();
 }
@@ -311,6 +351,7 @@ async function deleteTask(task) {
   if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
   await api(`${API_TASKS_URL}/${task.id}`, { method: "DELETE" });
   await loadTasks();
+  await loadDueMessages();
   await loadActivity();
   els.dialog.close();
   render();
@@ -583,8 +624,90 @@ function sendClientMessage(clientId, channel, source) {
   window.location.href = `sms:${phone}?body=${encoded}`;
 }
 
+function openPreparedMessage(channel, phone, message) {
+  const digits = phoneDigits(phone);
+  if (!digits || !message) return;
+  const encoded = encodeURIComponent(message);
+  if (channel === "whatsapp") {
+    window.open(`https://wa.me/${digits}?text=${encoded}`, "_blank", "noopener,noreferrer");
+    return;
+  }
+  window.location.href = `sms:${digits}?body=${encoded}`;
+}
+
+function scheduleWhen(schedule) {
+  const weekdays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  if (schedule.cadence === "daily") return `Daily at ${schedule.send_time}`;
+  if (schedule.cadence === "weekly") return `${weekdays[Number(schedule.day_of_week)] || "Monday"} at ${schedule.send_time}`;
+  return `Every ${schedule.day_of_month} at ${schedule.send_time}`;
+}
+
+function messageTypeLabel(value) {
+  return { general: "General", notes: "Notes", block: "Block" }[value] || value;
+}
+
+function renderDueClientMessages() {
+  return `
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Due client messages</h3>
+        <span class="mini">${state.dueMessages.length} ready</span>
+      </div>
+      <div class="task-list">
+        ${
+          state.dueMessages
+            .map(
+              (message) => `
+                <div class="master-row">
+                  <div>
+                    <strong>${escapeHtml(message.client_name)}</strong>
+                    <div class="task-meta">${escapeHtml(message.schedule_name)} - ${messageTypeLabel(message.message_type)} - ${message.channel.toUpperCase()} - ${message.send_time}</div>
+                    <div class="task-note">${escapeHtml(message.message)}</div>
+                  </div>
+                  <button class="secondary-button" data-action="send-due-message" data-channel="${message.channel}" data-phone="${escapeHtml(message.phone)}" data-message="${escapeHtml(message.message)}" type="button">Send</button>
+                </div>
+              `
+            )
+            .join("") || renderTaskList([], "No scheduled client messages are due right now")
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderMessageSchedules() {
+  return `
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Message schedules</h3>
+        <button class="primary-button" data-action="add-schedule">Add schedule</button>
+      </div>
+      <div class="task-list">
+        ${
+          state.messageSchedules
+            .map((schedule) => {
+              const clientCount = schedule.audience === "all" ? "All clients" : `${schedule.client_ids.length} selected`;
+              return `
+                <div class="master-row">
+                  <div>
+                    <strong>${escapeHtml(schedule.name)}</strong>
+                    <div class="task-meta">${messageTypeLabel(schedule.message_type)} - ${schedule.channel.toUpperCase()} - ${clientCount} - ${scheduleWhen(schedule)}</div>
+                  </div>
+                  <button class="icon-button" data-action="edit-schedule" data-id="${schedule.id}" type="button">Edit</button>
+                </div>
+              `;
+            })
+            .join("") || renderTaskList([], "No client message schedules yet")
+        }
+      </div>
+    </div>
+  `;
+}
+
 function renderClients() {
   els.views.clients.innerHTML = `
+    ${renderDueClientMessages()}
+    ${renderMessageSchedules()}
     <div class="panel">
       <div class="panel-head">
         <h3>Clients</h3>
@@ -785,6 +908,7 @@ async function saveClientForm(event) {
     body: JSON.stringify(payload),
   });
   await loadClients();
+  await loadDueMessages();
   await loadActivity();
   populateMasterControls();
   els.clientDialog.close();
@@ -796,9 +920,89 @@ async function deleteClientFromDialog() {
   if (!id || !window.confirm("Delete this client? Existing task history will remain.")) return;
   await api(`${API_CLIENTS_URL}/${id}`, { method: "DELETE" });
   await loadClients();
+  await loadMessageSchedules();
+  await loadDueMessages();
   await loadActivity();
   populateMasterControls();
   els.clientDialog.close();
+  render();
+}
+
+function openScheduleDialog(schedule = null) {
+  els.scheduleForm.reset();
+  els.deleteScheduleBtn.hidden = !schedule;
+  els.scheduleDialogTitle.textContent = schedule ? "Edit schedule" : "Add schedule";
+  const defaults = {
+    id: "",
+    name: "",
+    message_type: "general",
+    channel: "whatsapp",
+    audience: "all",
+    cadence: "weekly",
+    day_of_week: 0,
+    day_of_month: 1,
+    send_time: "10:00",
+    client_ids: [],
+    active: true,
+  };
+  const data = { ...defaults, ...(schedule || {}) };
+  els.scheduleFields.id.value = data.id || "";
+  els.scheduleFields.name.value = data.name;
+  els.scheduleFields.message_type.value = data.message_type;
+  els.scheduleFields.channel.value = data.channel;
+  els.scheduleFields.audience.value = data.audience;
+  els.scheduleFields.cadence.value = data.cadence;
+  els.scheduleFields.day_of_week.value = data.day_of_week;
+  els.scheduleFields.day_of_month.value = data.day_of_month;
+  els.scheduleFields.send_time.value = data.send_time;
+  els.scheduleFields.active.checked = Boolean(data.active);
+  populateScheduleClients(data.client_ids || []);
+  els.scheduleDialog.showModal();
+}
+
+function readScheduleForm() {
+  return {
+    name: els.scheduleFields.name.value.trim(),
+    message_type: els.scheduleFields.message_type.value,
+    channel: els.scheduleFields.channel.value,
+    audience: els.scheduleFields.audience.value,
+    cadence: els.scheduleFields.cadence.value,
+    day_of_week: Number(els.scheduleFields.day_of_week.value || 0),
+    day_of_month: Number(els.scheduleFields.day_of_month.value || 1),
+    send_time: els.scheduleFields.send_time.value,
+    client_ids: Array.from(els.scheduleFields.client_ids.selectedOptions).map((option) => Number(option.value)),
+    active: els.scheduleFields.active.checked,
+  };
+}
+
+async function saveScheduleForm(event) {
+  event.preventDefault();
+  const payload = readScheduleForm();
+  if (payload.audience === "selected" && !payload.client_ids.length) {
+    window.alert("Select at least one client for this schedule.");
+    return;
+  }
+  const id = els.scheduleFields.id.value;
+  if (!window.confirm(`${id ? "Edit" : "Add"} message schedule "${payload.name}"?`)) return;
+  await api(id ? `${API_MESSAGE_SCHEDULES_URL}/${id}` : API_MESSAGE_SCHEDULES_URL, {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(payload),
+  });
+  await loadMessageSchedules();
+  await loadDueMessages();
+  await loadActivity();
+  els.scheduleDialog.close();
+  render();
+}
+
+async function deleteScheduleFromDialog() {
+  const id = els.scheduleFields.id.value;
+  if (!id || !window.confirm("Delete this message schedule?")) return;
+  await api(`${API_MESSAGE_SCHEDULES_URL}/${id}`, { method: "DELETE" });
+  await loadMessageSchedules();
+  await loadDueMessages();
+  await loadActivity();
+  els.scheduleDialog.close();
   render();
 }
 
@@ -854,6 +1058,7 @@ async function saveForm(event) {
     body: JSON.stringify(payload),
   });
   await loadTasks();
+  await loadDueMessages();
   await loadActivity();
   els.dialog.close();
   render();
@@ -928,6 +1133,7 @@ async function runAssistantCommand(text) {
   state.conversation.push({ role: "You", text });
   state.conversation.push({ role: "GPA", text: assistantResponseText(response) });
   await loadTasks();
+  await loadDueMessages();
   await loadActivity();
   await loadBriefing();
   render();
@@ -1054,12 +1260,14 @@ function bindEvents() {
   });
   els.form.addEventListener("submit", saveForm);
   els.clientForm.addEventListener("submit", saveClientForm);
+  els.scheduleForm.addEventListener("submit", saveScheduleForm);
   els.masterForm.addEventListener("submit", saveMasterForm);
   els.deleteTaskBtn.addEventListener("click", () => {
     const task = state.tasks.find((item) => String(item.id) === String(els.fields.id.value));
     if (task) deleteTask(task);
   });
   els.deleteClientBtn.addEventListener("click", deleteClientFromDialog);
+  els.deleteScheduleBtn.addEventListener("click", deleteScheduleFromDialog);
   els.deleteMasterBtn.addEventListener("click", deleteMasterFromDialog);
   document.body.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
@@ -1075,6 +1283,19 @@ function bindEvents() {
     }
     if (target.dataset.action === "client-message") {
       sendClientMessage(target.dataset.id, target.dataset.channel, target);
+      return;
+    }
+    if (target.dataset.action === "send-due-message") {
+      openPreparedMessage(target.dataset.channel, target.dataset.phone, target.dataset.message);
+      return;
+    }
+    if (target.dataset.action === "add-schedule") {
+      openScheduleDialog();
+      return;
+    }
+    if (target.dataset.action === "edit-schedule") {
+      const schedule = state.messageSchedules.find((item) => String(item.id) === String(target.dataset.id));
+      if (schedule) openScheduleDialog(schedule);
       return;
     }
     if (target.dataset.action === "add-master") {
@@ -1113,6 +1334,8 @@ async function init() {
     await loadClients();
     populateMasterControls();
     await loadTasks();
+    await loadMessageSchedules();
+    await loadDueMessages();
     await loadActivity();
     await loadBriefing();
     bindEvents();

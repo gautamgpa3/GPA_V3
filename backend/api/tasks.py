@@ -10,6 +10,7 @@ from backend.database.engine import get_session
 from backend.models.activity import ActivityLog
 from backend.models.client import Client
 from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
+from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.task import Task
 
 router = APIRouter(prefix="/api", tags=["Tasks"])
@@ -70,6 +71,27 @@ class ClientCreate(ClientBase):
 
 
 class ClientUpdate(ClientBase):
+    pass
+
+
+class MessageScheduleBase(BaseModel):
+    name: str = Field(min_length=1, max_length=160)
+    message_type: str = "general"
+    channel: str = "whatsapp"
+    audience: str = "all"
+    client_ids: list[int] = []
+    cadence: str = "weekly"
+    day_of_week: int = Field(default=0, ge=0, le=6)
+    day_of_month: int = Field(default=1, ge=1, le=31)
+    send_time: str = Field(default="10:00", pattern=r"^\d{2}:\d{2}$")
+    active: bool = True
+
+
+class MessageScheduleCreate(MessageScheduleBase):
+    pass
+
+
+class MessageScheduleUpdate(MessageScheduleBase):
     pass
 
 
@@ -229,6 +251,83 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate) -> dict:
     if not data["phone"]:
         raise HTTPException(status_code=400, detail="Client phone is required")
     return data
+
+
+def normalize_schedule_data(schedule_data: MessageScheduleCreate | MessageScheduleUpdate, session: Session) -> dict:
+    data = schedule_data.model_dump()
+    data["name"] = data["name"].strip()
+    data["message_type"] = data["message_type"].strip().lower()
+    data["channel"] = data["channel"].strip().lower()
+    data["audience"] = data["audience"].strip().lower()
+    data["cadence"] = data["cadence"].strip().lower()
+    if data["message_type"] not in {"general", "notes", "block"}:
+        raise HTTPException(status_code=400, detail="Invalid message type")
+    if data["channel"] not in {"whatsapp", "sms"}:
+        raise HTTPException(status_code=400, detail="Invalid channel")
+    if data["audience"] not in {"all", "selected"}:
+        raise HTTPException(status_code=400, detail="Invalid audience")
+    if data["cadence"] not in {"daily", "weekly", "monthly"}:
+        raise HTTPException(status_code=400, detail="Invalid cadence")
+    hour, minute = [int(part) for part in data["send_time"].split(":")]
+    if hour > 23 or minute > 59:
+        raise HTTPException(status_code=400, detail="Invalid send time")
+    client_ids = sorted({int(client_id) for client_id in data.pop("client_ids")})
+    for client_id in client_ids:
+        client = session.get(Client, client_id)
+        if not client or not client.active:
+            raise HTTPException(status_code=400, detail=f"Invalid client selected: {client_id}")
+    if data["audience"] == "selected" and not client_ids:
+        raise HTTPException(status_code=400, detail="Select at least one client")
+    data["client_ids"] = ",".join(str(client_id) for client_id in client_ids)
+    return data
+
+
+def schedule_client_ids(schedule: ClientMessageSchedule) -> list[int]:
+    return [int(value) for value in schedule.client_ids.split(",") if value.strip().isdigit()]
+
+
+def schedule_payload(schedule: ClientMessageSchedule) -> dict:
+    data = schedule.model_dump()
+    data["client_ids"] = schedule_client_ids(schedule)
+    return data
+
+
+def schedule_is_due(schedule: ClientMessageSchedule, at_time: datetime) -> bool:
+    try:
+        hour, minute = [int(part) for part in schedule.send_time.split(":")]
+    except ValueError:
+        return False
+    if (at_time.hour, at_time.minute) < (hour, minute):
+        return False
+    if schedule.cadence == "daily":
+        return True
+    if schedule.cadence == "weekly":
+        return at_time.weekday() == schedule.day_of_week
+    if schedule.cadence == "monthly":
+        return at_time.day == min(schedule.day_of_month, monthrange(at_time.year, at_time.month)[1])
+    return False
+
+
+def client_message_subject(session: Session, client: Client, message_type: str) -> str:
+    if message_type == "notes":
+        return client.notes.strip()
+    if message_type == "block":
+        blockers = session.exec(
+            select(Task).where(
+                Task.client_id == client.id,
+                Task.archived == False,  # noqa: E712
+                Task.status != "Completed",
+            )
+        ).all()
+        return "; ".join((task.issue or f"{task.title} is blocked.").strip() for task in blockers if task.status == "Blocked" or task.issue)
+    return client.work_scope.strip() or "your pending work"
+
+
+def client_message_text(session: Session, client: Client, message_type: str) -> str:
+    subject = client_message_subject(session, client, message_type)
+    if not subject:
+        return ""
+    return f"Hello {client.name}, please submit required documents for {subject}."
 
 
 def parse_assistant_date(text: str) -> date:
@@ -451,6 +550,83 @@ def delete_client(client_id: int, session: Session = Depends(get_session)):
     log_activity(session, "DELETED", "client", f"Deleted client: {client.name}", client.id)
     session.commit()
     return {"success": True, "message": "Client deleted"}
+
+
+@router.get("/client-message-schedules")
+def get_message_schedules(session: Session = Depends(get_session)):
+    schedules = session.exec(select(ClientMessageSchedule).order_by(ClientMessageSchedule.send_time, ClientMessageSchedule.name)).all()
+    return [schedule_payload(schedule) for schedule in schedules]
+
+
+@router.post("/client-message-schedules")
+def create_message_schedule(schedule_data: MessageScheduleCreate, session: Session = Depends(get_session)):
+    data = normalize_schedule_data(schedule_data, session)
+    schedule = ClientMessageSchedule(**data, updated_at=now())
+    session.add(schedule)
+    session.flush()
+    log_activity(session, "CREATED", "client_message_schedule", f"Added message schedule: {schedule.name}", schedule.id)
+    session.commit()
+    session.refresh(schedule)
+    return schedule_payload(schedule)
+
+
+@router.put("/client-message-schedules/{schedule_id}")
+def update_message_schedule(schedule_id: int, schedule_data: MessageScheduleUpdate, session: Session = Depends(get_session)):
+    schedule = session.get(ClientMessageSchedule, schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Message schedule not found")
+    data = normalize_schedule_data(schedule_data, session)
+    for field, value in data.items():
+        setattr(schedule, field, value)
+    schedule.updated_at = now()
+    session.add(schedule)
+    log_activity(session, "UPDATED", "client_message_schedule", f"Updated message schedule: {schedule.name}", schedule.id)
+    session.commit()
+    session.refresh(schedule)
+    return schedule_payload(schedule)
+
+
+@router.delete("/client-message-schedules/{schedule_id}")
+def delete_message_schedule(schedule_id: int, session: Session = Depends(get_session)):
+    schedule = session.get(ClientMessageSchedule, schedule_id)
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Message schedule not found")
+    session.delete(schedule)
+    log_activity(session, "DELETED", "client_message_schedule", f"Deleted message schedule: {schedule.name}", schedule.id)
+    session.commit()
+    return {"success": True, "message": "Message schedule deleted"}
+
+
+@router.get("/client-message-due")
+def get_due_client_messages(session: Session = Depends(get_session)):
+    at_time = now()
+    schedules = session.exec(select(ClientMessageSchedule).where(ClientMessageSchedule.active == True)).all()  # noqa: E712
+    active_clients = session.exec(select(Client).where(Client.active == True).order_by(Client.name)).all()  # noqa: E712
+    due_messages = []
+    for schedule in schedules:
+        if not schedule_is_due(schedule, at_time):
+            continue
+        selected_ids = set(schedule_client_ids(schedule))
+        clients = active_clients if schedule.audience == "all" else [client for client in active_clients if client.id in selected_ids]
+        for client in clients:
+            message = client_message_text(session, client, schedule.message_type)
+            phone = client.whatsapp or client.phone if schedule.channel == "whatsapp" else client.phone
+            if not message or not phone:
+                continue
+            due_messages.append(
+                {
+                    "schedule_id": schedule.id,
+                    "schedule_name": schedule.name,
+                    "client_id": client.id,
+                    "client_name": client.name,
+                    "channel": schedule.channel,
+                    "message_type": schedule.message_type,
+                    "phone": phone,
+                    "message": message,
+                    "send_time": schedule.send_time,
+                }
+            )
+    return due_messages
 
 
 @router.get("/tasks")

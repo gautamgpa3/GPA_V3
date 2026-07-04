@@ -226,6 +226,90 @@
       </form>
     </dialog>
 
+    <dialog id="scheduleDialog">
+      <form method="dialog" class="task-form" id="scheduleForm">
+        <div class="dialog-head">
+          <div>
+            <p class="eyebrow">Client messages</p>
+            <h3 id="scheduleDialogTitle">Add schedule</h3>
+          </div>
+          <button class="icon-button" value="cancel" formnovalidate title="Close">X</button>
+        </div>
+        <input type="hidden" id="scheduleId" />
+        <div class="form-grid">
+          <label>
+            <span>Name</span>
+            <input id="scheduleName" required maxlength="160" placeholder="Monday blockers" />
+          </label>
+          <label>
+            <span>Message</span>
+            <select id="scheduleMessageType">
+              <option value="general">General</option>
+              <option value="notes">Notes</option>
+              <option value="block">Block</option>
+            </select>
+          </label>
+          <label>
+            <span>Channel</span>
+            <select id="scheduleChannel">
+              <option value="whatsapp">WhatsApp</option>
+              <option value="sms">SMS</option>
+            </select>
+          </label>
+          <label>
+            <span>Audience</span>
+            <select id="scheduleAudience">
+              <option value="all">All clients</option>
+              <option value="selected">Selected clients</option>
+            </select>
+          </label>
+          <label>
+            <span>Cadence</span>
+            <select id="scheduleCadence">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </label>
+          <label>
+            <span>Time</span>
+            <input id="scheduleTime" type="time" required value="10:00" />
+          </label>
+          <label>
+            <span>Week day</span>
+            <select id="scheduleDayOfWeek">
+              <option value="0">Monday</option>
+              <option value="1">Tuesday</option>
+              <option value="2">Wednesday</option>
+              <option value="3">Thursday</option>
+              <option value="4">Friday</option>
+              <option value="5">Saturday</option>
+              <option value="6">Sunday</option>
+            </select>
+          </label>
+          <label>
+            <span>Month date</span>
+            <input id="scheduleDayOfMonth" type="number" min="1" max="31" value="1" />
+          </label>
+          <label class="full">
+            <span>Selected clients</span>
+            <select id="scheduleClients" multiple size="5"></select>
+          </label>
+          <label class="inline-check">
+            <input id="scheduleActive" type="checkbox" checked />
+            <span>Active</span>
+          </label>
+        </div>
+
+        <div class="dialog-actions">
+          <button class="danger-button" id="deleteScheduleBtn" type="button">Delete</button>
+          <div class="spacer"></div>
+          <button class="secondary-button" value="cancel" formnovalidate>Cancel</button>
+          <button class="primary-button" value="default">Save schedule</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="masterDialog">
       <form method="dialog" class="task-form compact-form" id="masterForm">
         <div class="dialog-head">
