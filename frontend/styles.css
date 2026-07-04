@@ -364,6 +364,28 @@ button {
   resize: vertical;
 }
 
+.variable-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.variable-chip {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.variable-chip:hover {
+  background: var(--text);
+  color: var(--panel);
+}
+
 .task-card {
   background: #ffffff;
   border: 1px solid var(--line);

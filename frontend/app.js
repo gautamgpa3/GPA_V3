@@ -793,15 +793,51 @@ function masterList(title, type, items) {
   `;
 }
 
+const TEMPLATE_VARIABLES = {
+  client_general: [
+    ["client_name", "Client name"],
+    ["work_scope", "Work scope"],
+    ["subject", "Selected message subject"],
+  ],
+  client_notes: [
+    ["client_name", "Client name"],
+    ["notes", "Client notes"],
+    ["subject", "Selected message subject"],
+  ],
+  client_block: [
+    ["client_name", "Client name"],
+    ["block", "Block / issue text"],
+    ["subject", "Selected message subject"],
+  ],
+  telegram_daily: [
+    ["pending_count", "Pending tasks"],
+    ["due_today_count", "Due today"],
+    ["overdue_count", "Overdue"],
+    ["meeting_count", "Meetings"],
+    ["bni_tomorrow_count", "BNI tomorrow"],
+  ],
+};
+
+function templateVariableButtons(templateKey) {
+  const variables = TEMPLATE_VARIABLES[templateKey] || [];
+  return variables
+    .map(
+      ([name, label]) => `
+        <button class="variable-chip" data-action="insert-template-variable" data-key="${escapeHtml(templateKey)}" data-variable="{${escapeHtml(name)}}" title="${escapeHtml(label)}" type="button">
+          {${escapeHtml(name)}}
+        </button>
+      `
+    )
+    .join("");
+}
+
 function messageTemplateList() {
-  const placeholders = "{client_name}, {subject}, {work_scope}, {notes}, {block}, {pending_count}, {due_today_count}, {overdue_count}, {meeting_count}, {bni_tomorrow_count}";
   return `
     <div class="panel">
       <div class="panel-head">
         <h3>Message templates</h3>
         <span class="mini">${state.messageTemplates.length} editable</span>
       </div>
-      <p class="task-meta">Placeholders: ${escapeHtml(placeholders)}</p>
       <div class="template-list">
         ${state.messageTemplates
           .map(
@@ -812,6 +848,9 @@ function messageTemplateList() {
                   <button class="secondary-button" data-action="save-template" data-key="${escapeHtml(template.key)}" type="button">Save</button>
                 </div>
                 <textarea data-template-body="${escapeHtml(template.key)}" rows="4">${escapeHtml(template.body)}</textarea>
+                <div class="variable-list" aria-label="Template variables">
+                  ${templateVariableButtons(template.key)}
+                </div>
               </article>
             `
           )
@@ -1117,6 +1156,18 @@ async function saveMessageTemplate(templateKey) {
   render();
 }
 
+function insertTemplateVariable(templateKey, variable) {
+  const selectorKey = window.CSS?.escape ? CSS.escape(templateKey) : templateKey;
+  const field = document.querySelector(`[data-template-body="${selectorKey}"]`);
+  if (!field) return;
+  const start = field.selectionStart ?? field.value.length;
+  const end = field.selectionEnd ?? field.value.length;
+  field.value = `${field.value.slice(0, start)}${variable}${field.value.slice(end)}`;
+  const nextPosition = start + variable.length;
+  field.focus();
+  field.setSelectionRange(nextPosition, nextPosition);
+}
+
 async function saveForm(event) {
   event.preventDefault();
   const payload = readForm();
@@ -1381,6 +1432,10 @@ function bindEvents() {
     }
     if (target.dataset.action === "save-template") {
       saveMessageTemplate(target.dataset.key);
+      return;
+    }
+    if (target.dataset.action === "insert-template-variable") {
+      insertTemplateVariable(target.dataset.key, target.dataset.variable);
       return;
     }
     const task = state.tasks.find((item) => String(item.id) === String(target.dataset.id));
