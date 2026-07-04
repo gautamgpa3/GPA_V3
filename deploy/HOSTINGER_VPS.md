@@ -118,6 +118,59 @@ https://gpa.yourdomain.com/
 
 Use Chrome or Edge for voice commands, and allow microphone permission when the browser asks.
 
+## 11. Enable daily Telegram reminders
+
+Create a Telegram bot with BotFather and copy the bot token. Send one message to your bot from your Telegram account, then get your chat ID:
+
+```bash
+curl "https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates"
+```
+
+Edit GPA environment:
+
+```bash
+nano /opt/gpa-v3/app/.env
+```
+
+Set:
+
+```env
+TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN
+TELEGRAM_CHAT_ID=YOUR_CHAT_ID
+```
+
+Install and start the daily reminder timer:
+
+```bash
+cp /opt/gpa-v3/app/deploy/gpa-v3-telegram-reminder.service /etc/systemd/system/gpa-v3-telegram-reminder.service
+cp /opt/gpa-v3/app/deploy/gpa-v3-telegram-reminder.timer /etc/systemd/system/gpa-v3-telegram-reminder.timer
+systemctl daemon-reload
+systemctl enable --now gpa-v3-telegram-reminder.timer
+systemctl list-timers gpa-v3-telegram-reminder.timer
+```
+
+Default send time is `08:30` server time. To change it:
+
+```bash
+nano /etc/systemd/system/gpa-v3-telegram-reminder.timer
+systemctl daemon-reload
+systemctl restart gpa-v3-telegram-reminder.timer
+```
+
+Test without sending:
+
+```bash
+cd /opt/gpa-v3/app
+/opt/gpa-v3/venv/bin/python -m backend.jobs.telegram_reminder --dry-run
+```
+
+Send a test message:
+
+```bash
+cd /opt/gpa-v3/app
+/opt/gpa-v3/venv/bin/python -m backend.jobs.telegram_reminder --force
+```
+
 ## Update later
 
 ```bash

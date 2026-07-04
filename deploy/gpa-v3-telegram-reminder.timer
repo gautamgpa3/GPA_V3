@@ -1,0 +1,10 @@
+[Unit]
+Description=Run GPA V3 Telegram reminder every morning
+
+[Timer]
+OnCalendar=*-*-* 08:30:00
+Persistent=true
+Unit=gpa-v3-telegram-reminder.service
+
+[Install]
+WantedBy=timers.target
