@@ -513,6 +513,7 @@ def build_briefing(session: Session) -> dict:
         "bni_tomorrow_count": len(bni_tomorrow),
         "overdue_count": len(overdue),
         "due_today_count": len(due_today),
+        "tasks": tasks,
         "priorities": priorities,
         "upcoming": upcoming[:6],
         "suggestions": suggestions,

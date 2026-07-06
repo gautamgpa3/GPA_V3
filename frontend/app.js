@@ -926,6 +926,7 @@ const TEMPLATE_VARIABLES = {
   ],
   telegram_daily: [
     ["pending_count", "Pending tasks"],
+    ["pending_tasks", "Pending task list"],
     ["due_today_count", "Due today"],
     ["overdue_count", "Overdue"],
     ["meeting_count", "Meetings"],

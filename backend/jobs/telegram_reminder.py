@@ -11,6 +11,7 @@ from sqlmodel import Session, select
 from backend.api.tasks import build_briefing, get_due_client_messages, message_template_body, render_template
 from backend.database.engine import create_db, engine
 from backend.models.activity import ActivityLog
+from backend.models.client import Client
 
 
 REMINDER_ENTITY = "telegram_daily_reminder"
@@ -47,29 +48,37 @@ def already_sent_today(session: Session, today: date) -> bool:
     )
 
 
-def task_line(task) -> str:
-    due = task.due_date.isoformat() if task.due_date else "No due date"
-    return f"- {task.title} ({task.priority}, due {due})"
+def client_name_for_task(task, clients_by_id: dict[int, str]) -> str:
+    if not task.client_id:
+        return "No client"
+    return clients_by_id.get(task.client_id, "Client not found")
+
+
+def task_line(task, clients_by_id: dict[int, str]) -> str:
+    return f"- {task.title} - {client_name_for_task(task, clients_by_id)}"
 
 
 def build_message(session: Session) -> str:
     briefing = build_briefing(session)
     due_messages = get_due_client_messages(session)
+    clients_by_id = {client.id: client.name for client in session.exec(select(Client)).all() if client.id is not None}
+    pending_lines = [task_line(task, clients_by_id) for task in briefing.get("tasks", [])]
     opening_template = message_template_body(session, "telegram_daily", briefing["message"])
-    opening = render_template(opening_template, briefing)
+    opening = render_template(opening_template, {**briefing, "pending_tasks": "\n".join(pending_lines) or "None"})
     lines = [
         opening,
         "",
         f"Due today: {briefing['due_today_count']}",
         f"Overdue: {briefing['overdue_count']}",
-        f"Pending: {briefing['pending_count']}",
+        "Pending:",
+        *(pending_lines or ["- None"]),
         f"Client messages ready: {len(due_messages)}",
     ]
 
     priorities = briefing.get("priorities", [])[:5]
     if priorities:
         lines.extend(["", "Today's priorities:"])
-        lines.extend(task_line(task) for task in priorities)
+        lines.extend(task_line(task, clients_by_id) for task in priorities)
 
     suggestions = briefing.get("suggestions", [])[:3]
     if suggestions:
