@@ -50,10 +50,18 @@ ACTIVITY_COLUMNS = {
     "details": "TEXT DEFAULT ''",
 }
 
+CLIENT_COLUMNS = {
+    "birth_date": "DATE",
+}
+
 MESSAGE_TEMPLATES = [
     ("client_general", "Client general", "Hello {client_name}, please submit required documents for {work_scope}."),
     ("client_notes", "Task notes", "Hello {client_name}, please submit required documents for {notes}."),
     ("client_block", "Client block", "Hello {client_name}, please submit required documents for {block}."),
+    ("task_created", "Task received update", "Hello {client_name}, your work of {task_title} is received and we are working on it. We will update you on the progress."),
+    ("task_updated", "Task progress update", "Hello {client_name}, update for {task_title}: {update_details}."),
+    ("task_completed", "Task completed update", "Hello {client_name}, your work of {task_title} has been completed."),
+    ("client_birthday", "Birthday greeting", "Happy Birthday {client_name}. Wishing you a wonderful year ahead."),
     (
         "telegram_daily",
         "Telegram daily summary",
@@ -66,6 +74,7 @@ def create_db():
     SQLModel.metadata.create_all(engine)
     migrate_task_table()
     migrate_activity_table()
+    migrate_client_table()
     seed_master_data()
     seed_message_templates()
 
@@ -106,6 +115,17 @@ def migrate_activity_table():
             if column not in existing:
                 connection.execute(text(f"ALTER TABLE activity_logs ADD COLUMN {column} {definition}"))
         connection.execute(text("UPDATE activity_logs SET details = '' WHERE details IS NULL"))
+
+
+def migrate_client_table():
+    with engine.begin() as connection:
+        existing = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(clients)")).fetchall()
+        }
+        for column, definition in CLIENT_COLUMNS.items():
+            if column not in existing:
+                connection.execute(text(f"ALTER TABLE clients ADD COLUMN {column} {definition}"))
 
 
 def seed_master_data():

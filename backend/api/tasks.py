@@ -59,6 +59,7 @@ class ClientBase(BaseModel):
     address: str = ""
     gst_no: str = ""
     work_scope: str = ""
+    birth_date: date | None = None
     notes: str = ""
     active: bool = True
 
@@ -378,7 +379,7 @@ def schedule_is_due(schedule: ClientMessageSchedule, at_time: datetime) -> bool:
     return False
 
 
-def client_message_subject(session: Session, client: Client, message_type: str) -> str:
+def client_message_content(session: Session, client: Client, message_type: str) -> str:
     if message_type == "notes":
         tasks = session.exec(
             select(Task).where(
@@ -406,20 +407,35 @@ def client_message_subject(session: Session, client: Client, message_type: str) 
 
 
 def client_message_text(session: Session, client: Client, message_type: str) -> str:
-    subject = client_message_subject(session, client, message_type)
-    if not subject:
+    message_content = client_message_content(session, client, message_type)
+    if not message_content:
         return ""
     key = f"client_{message_type}"
-    fallback = "Hello {client_name}, please submit required documents for {subject}."
+    fallback_variables = {
+        "general": "{work_scope}",
+        "notes": "{notes}",
+        "block": "{block}",
+    }
+    fallback = f"Hello {{client_name}}, please submit required documents for {fallback_variables.get(message_type, '{work_scope}')}."
     template = message_template_body(session, key, fallback)
     return render_template(
         template,
         {
             "client_name": client.name,
-            "subject": subject,
-            "work_scope": subject,
-            "notes": subject,
-            "block": subject,
+            "work_scope": message_content,
+            "notes": message_content,
+            "block": message_content,
+        },
+    )
+
+
+def birthday_message_text(session: Session, client: Client) -> str:
+    template = message_template_body(session, "client_birthday", "Happy Birthday {client_name}. Wishing you a wonderful year ahead.")
+    return render_template(
+        template,
+        {
+            "client_name": client.name,
+            "birth_date": client.birth_date.isoformat() if client.birth_date else "",
         },
     )
 
@@ -717,6 +733,26 @@ def get_due_client_messages(session: Session = Depends(get_session)):
     schedules = session.exec(select(ClientMessageSchedule).where(ClientMessageSchedule.active == True)).all()  # noqa: E712
     active_clients = session.exec(select(Client).where(Client.active == True).order_by(Client.name)).all()  # noqa: E712
     due_messages = []
+    for client in active_clients:
+        if not client.birth_date or client.birth_date.month != at_time.month or client.birth_date.day != at_time.day:
+            continue
+        phone = client.whatsapp or client.phone
+        message = birthday_message_text(session, client)
+        if not phone or not message:
+            continue
+        due_messages.append(
+            {
+                "schedule_id": "",
+                "schedule_name": "Birthday greeting",
+                "client_id": client.id,
+                "client_name": client.name,
+                "channel": "whatsapp",
+                "message_type": "birthday",
+                "phone": phone,
+                "message": message,
+                "send_time": "09:00",
+            }
+        )
     for schedule in schedules:
         if not schedule_is_due(schedule, at_time):
             continue

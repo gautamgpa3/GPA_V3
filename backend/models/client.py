@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -14,6 +14,7 @@ class Client(SQLModel, table=True):
     address: str = ""
     gst_no: str = ""
     work_scope: str = ""
+    birth_date: Optional[date] = None
     notes: str = ""
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)

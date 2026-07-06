@@ -97,6 +97,7 @@ const els = {
     address: document.querySelector("#clientAddress"),
     gst_no: document.querySelector("#clientGst"),
     work_scope: document.querySelector("#clientWorkScope"),
+    birth_date: document.querySelector("#clientBirthDate"),
   },
   scheduleFields: {
     id: document.querySelector("#scheduleId"),
@@ -366,11 +367,12 @@ function filteredTasks() {
 
 async function completeTask(task) {
   if (!window.confirm(`Mark "${task.title}" as completed?`)) return;
-  await api(`${API_TASKS_URL}/${task.id}/complete`, { method: "PUT" });
+  const completedTask = normalizeTask(await api(`${API_TASKS_URL}/${task.id}/complete`, { method: "PUT" }));
   await loadTasks();
   await loadDueMessages();
   await loadActivity();
   render();
+  sendTaskStageWhatsApp(completedTask, "completed", task);
 }
 
 async function deleteTask(task) {
@@ -620,32 +622,31 @@ function clientTaskNotes(clientId) {
 }
 
 function clientMessage(client, type) {
-  let subject = client.work_scope || "your pending work";
+  let messageContent = client.work_scope || "your pending work";
 
   if (type === "notes") {
-    subject = clientTaskNotes(client.id)
+    messageContent = clientTaskNotes(client.id)
       .map((task) => task.notes.trim())
       .filter(Boolean)
       .join("; ");
   }
 
   if (type === "block") {
-    subject = clientBlockers(client.id)
+    messageContent = clientBlockers(client.id)
       .map((task) => task.issue || task.notes || `${task.title} is blocked.`)
       .filter(Boolean)
       .join("; ");
   }
 
-  if (!subject) return "";
+  if (!messageContent) return "";
   const template =
     state.messageTemplates.find((item) => item.key === `client_${type}`)?.body ||
-    "Hello {client_name}, please submit required documents for {subject}.";
+    "Hello {client_name}, please submit required documents for {work_scope}.";
   return renderMessageTemplate(template, {
     client_name: client.name,
-    subject,
-    work_scope: subject,
-    notes: subject,
-    block: subject,
+    work_scope: messageContent,
+    notes: messageContent,
+    block: messageContent,
   });
 }
 
@@ -687,6 +688,65 @@ function openPreparedMessage(channel, phone, message) {
     return;
   }
   window.location.href = `sms:${digits}?body=${encoded}`;
+}
+
+function taskClient(task) {
+  if (!task?.client_id) return null;
+  return state.clients.find((client) => Number(client.id) === Number(task.client_id)) || null;
+}
+
+function taskUpdateDetails(previousTask, nextTask) {
+  if (!previousTask) return "";
+  const details = [];
+  if ((previousTask.notes || "") !== (nextTask.notes || "")) {
+    details.push(`Notes updated: ${nextTask.notes || "notes cleared"}`);
+  }
+  if ((previousTask.issue || "") !== (nextTask.issue || "")) {
+    details.push(`Block updated: ${nextTask.issue || "block cleared"}`);
+  }
+  if ((previousTask.status || "") !== (nextTask.status || "")) {
+    details.push(`Status updated to ${nextTask.status}`);
+  }
+  if ((previousTask.due_date || "") !== (nextTask.due_date || "")) {
+    details.push(`Due date updated to ${formatDate(nextTask.due_date)}`);
+  }
+  return details.join("; ") || "Your work progress has been updated.";
+}
+
+function taskStageMessage(task, stage, previousTask = null) {
+  const client = taskClient(task);
+  if (!client) return null;
+  const templateKey = {
+    created: "task_created",
+    updated: "task_updated",
+    completed: "task_completed",
+  }[stage];
+  const fallback = {
+    created: "Hello {client_name}, your work of {task_title} is received and we are working on it. We will update you on the progress.",
+    updated: "Hello {client_name}, update for {task_title}: {update_details}.",
+    completed: "Hello {client_name}, your work of {task_title} has been completed.",
+  }[stage];
+  const template = state.messageTemplates.find((item) => item.key === templateKey)?.body || fallback;
+  return {
+    client,
+    message: renderMessageTemplate(template, {
+      client_name: client.name,
+      task_title: task.title,
+      task_status: task.status,
+      update_details: taskUpdateDetails(previousTask, task),
+      notes: task.notes || "",
+      block: task.issue || "",
+      due_date: formatDate(task.due_date),
+    }),
+  };
+}
+
+function sendTaskStageWhatsApp(task, stage, previousTask = null) {
+  const prepared = taskStageMessage(task, stage, previousTask);
+  if (!prepared) return;
+  const phone = prepared.client.whatsapp || prepared.client.phone;
+  if (!phone) return;
+  openPreparedMessage("whatsapp", phone, prepared.message);
 }
 
 function scheduleWhen(schedule) {
@@ -778,6 +838,7 @@ function renderClients() {
                   <div>
                     <button class="task-title" data-action="edit-client" data-id="${client.id}">${escapeHtml(client.name)}</button>
                     <div class="task-meta">${escapeHtml(client.phone || "No phone")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
+                    ${client.birth_date ? `<div class="task-meta">Birth date: ${formatDate(client.birth_date)}</div>` : ""}
                   </div>
                 </div>
                 <div class="task-note">${escapeHtml(client.work_scope || "No work scope recorded")}</div>
@@ -832,17 +893,36 @@ const TEMPLATE_VARIABLES = {
   client_general: [
     ["client_name", "Client name"],
     ["work_scope", "Work scope"],
-    ["subject", "Selected message subject"],
   ],
   client_notes: [
     ["client_name", "Client name"],
     ["notes", "Active task notes"],
-    ["subject", "Selected message subject"],
   ],
   client_block: [
     ["client_name", "Client name"],
     ["block", "Block / issue text"],
-    ["subject", "Selected message subject"],
+  ],
+  task_created: [
+    ["client_name", "Client name"],
+    ["task_title", "Task title"],
+    ["due_date", "Due date"],
+  ],
+  task_updated: [
+    ["client_name", "Client name"],
+    ["task_title", "Task title"],
+    ["update_details", "Changed details"],
+    ["notes", "Task notes"],
+    ["block", "Task block / issue"],
+    ["due_date", "Due date"],
+  ],
+  task_completed: [
+    ["client_name", "Client name"],
+    ["task_title", "Task title"],
+    ["due_date", "Due date"],
+  ],
+  client_birthday: [
+    ["client_name", "Client name"],
+    ["birth_date", "Birth date"],
   ],
   telegram_daily: [
     ["pending_count", "Pending tasks"],
@@ -1018,6 +1098,7 @@ function openClientDialog(client = null) {
     address: "",
     gst_no: "",
     work_scope: "",
+    birth_date: "",
   };
   const data = { ...defaults, ...(client || {}) };
   Object.entries(els.clientFields).forEach(([key, field]) => {
@@ -1034,6 +1115,7 @@ function readClientForm() {
     address: els.clientFields.address.value.trim(),
     gst_no: els.clientFields.gst_no.value.trim(),
     work_scope: els.clientFields.work_scope.value.trim(),
+    birth_date: els.clientFields.birth_date.value || null,
     active: true,
   };
 }
@@ -1250,16 +1332,18 @@ async function saveForm(event) {
   const payload = readForm();
   if (!payload.title) return;
   const id = els.fields.id.value;
+  const previousTask = id ? state.tasks.find((task) => String(task.id) === String(id)) : null;
   if (!window.confirm(`${id ? "Edit" : "Add"} task "${payload.title}"?`)) return;
-  await api(id ? `${API_TASKS_URL}/${id}` : API_TASKS_URL, {
+  const savedTask = normalizeTask(await api(id ? `${API_TASKS_URL}/${id}` : API_TASKS_URL, {
     method: id ? "PUT" : "POST",
     body: JSON.stringify(payload),
-  });
+  }));
   await loadTasks();
   await loadDueMessages();
   await loadActivity();
   els.dialog.close();
   render();
+  sendTaskStageWhatsApp(savedTask, id ? "updated" : "created", previousTask);
 }
 
 function parseSpokenDate(text) {
@@ -1419,6 +1503,7 @@ function exportCSV() {
     "Client Mobile",
     "Client WhatsApp",
     "Client GST No.",
+    "Client Birth Date",
     "Client Work Scope",
     "Start Date",
     "Due Date",
@@ -1457,6 +1542,7 @@ function exportCSV() {
       client?.phone,
       client?.whatsapp,
       client?.gst_no,
+      client?.birth_date,
       client?.work_scope,
       task.start_date,
       task.due_date,
@@ -1508,6 +1594,7 @@ function exportCSV() {
       client?.phone,
       client?.whatsapp,
       client?.gst_no,
+      client?.birth_date,
       client?.work_scope,
       task.start_date || "",
       task.due_date || "",
