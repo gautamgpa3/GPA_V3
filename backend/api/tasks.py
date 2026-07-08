@@ -1,6 +1,6 @@
 from calendar import monthrange
 from datetime import date, datetime, timedelta
-from re import search, sub
+from re import fullmatch, search, sub
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -317,6 +317,16 @@ def normalize_phone_number(value: str, label: str, required: bool = False) -> st
     return digits
 
 
+def normalize_gst_no(value: str) -> str:
+    gst_no = sub(r"[^A-Za-z0-9]", "", value or "").upper()
+    if not gst_no:
+        return ""
+    pattern = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
+    if not fullmatch(pattern, gst_no):
+        raise HTTPException(status_code=400, detail="GST No. must be a valid 15-character GSTIN")
+    return gst_no
+
+
 def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Session) -> dict:
     data = client_data.model_dump()
     for key, value in data.items():
@@ -328,6 +338,7 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Ses
     ensure_master_value(session, Category, data["category"], "category")
     data["phone"] = normalize_phone_number(data["phone"], "Mobile / SMS", required=True)
     data["whatsapp"] = normalize_phone_number(data["whatsapp"], "WhatsApp")
+    data["gst_no"] = normalize_gst_no(data["gst_no"])
     return data
 
 

@@ -369,6 +369,18 @@ function isTenDigitPhone(value) {
   return /^\d{10}$/.test(value);
 }
 
+function gstNumber(value = "") {
+  return String(value).replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 15);
+}
+
+function normalizeGstInput(field) {
+  field.value = gstNumber(field.value);
+}
+
+function isValidGstNumber(value) {
+  return !value || /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(value);
+}
+
 function byName(a, b) {
   return String(a.name || a).localeCompare(String(b.name || b), undefined, { sensitivity: "base" });
 }
@@ -1331,7 +1343,7 @@ function readClientForm() {
     phone: phoneDigits(els.clientFields.phone.value),
     whatsapp: phoneDigits(els.clientFields.whatsapp.value),
     address: els.clientFields.address.value.trim(),
-    gst_no: els.clientFields.gst_no.value.trim(),
+    gst_no: gstNumber(els.clientFields.gst_no.value),
     work_scope: els.clientFields.work_scope.value.trim(),
     birth_date: els.clientFields.birth_date.value || null,
     active: true,
@@ -1350,6 +1362,11 @@ async function saveClientForm(event) {
   if (payload.whatsapp && !isTenDigitPhone(payload.whatsapp)) {
     window.alert("WhatsApp must be exactly 10 digits.");
     els.clientFields.whatsapp.focus();
+    return;
+  }
+  if (!isValidGstNumber(payload.gst_no)) {
+    window.alert("GST No. must be a valid 15-character GSTIN.");
+    els.clientFields.gst_no.focus();
     return;
   }
   const id = els.clientFields.id.value;
@@ -1928,6 +1945,7 @@ function bindEvents() {
   [els.clientFields.phone, els.clientFields.whatsapp].forEach((field) => {
     field.addEventListener("input", () => normalizePhoneInput(field));
   });
+  els.clientFields.gst_no.addEventListener("input", () => normalizeGstInput(els.clientFields.gst_no));
   els.scheduleForm.addEventListener("submit", saveScheduleForm);
   els.masterForm.addEventListener("submit", saveMasterForm);
   els.deleteTaskBtn.addEventListener("click", () => {
