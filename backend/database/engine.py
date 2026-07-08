@@ -51,6 +51,7 @@ ACTIVITY_COLUMNS = {
 }
 
 CLIENT_COLUMNS = {
+    "category": "TEXT DEFAULT 'Client'",
     "birth_date": "DATE",
 }
 
@@ -126,17 +127,12 @@ def migrate_client_table():
         for column, definition in CLIENT_COLUMNS.items():
             if column not in existing:
                 connection.execute(text(f"ALTER TABLE clients ADD COLUMN {column} {definition}"))
+        connection.execute(text("UPDATE clients SET category = 'Client' WHERE category IS NULL OR category = '' OR category = 'General'"))
 
 
 def seed_master_data():
     with Session(engine) as session:
         for model, names in SEED_DATA.items():
-            if model is Category:
-                existing_items = session.exec(select(model)).all()
-                for item in existing_items:
-                    if item.name not in names:
-                        item.active = False
-                        session.add(item)
             for index, name in enumerate(names, start=1):
                 exists = session.exec(select(model).where(model.name == name)).first()
                 if not exists:

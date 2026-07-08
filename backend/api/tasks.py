@@ -1,6 +1,6 @@
 from calendar import monthrange
 from datetime import date, datetime, timedelta
-from re import search
+from re import search, sub
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -54,6 +54,7 @@ class MasterItemUpdate(BaseModel):
 
 class ClientBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    category: str = "Client"
     phone: str = Field(min_length=1, max_length=40)
     whatsapp: str = ""
     address: str = ""
@@ -222,13 +223,16 @@ def normalize_task_data(task_data: TaskCreate | TaskUpdate, session: Session) ->
         raise HTTPException(status_code=400, detail="Due date cannot be before start date")
     if data["repeat_type"] == "None":
         data["repeat_every"] = 1
-    ensure_master_value(session, Category, data["category"], "category")
     ensure_master_value(session, Priority, data["priority"], "priority")
     ensure_master_value(session, Status, data["status"], "status")
     ensure_master_value(session, Owner, data["owner"], "assigned to")
     ensure_master_value(session, RepeatType, data["repeat_type"], "repeat type")
-    if data["client_id"] is not None and not session.get(Client, data["client_id"]):
+    client = session.get(Client, data["client_id"]) if data["client_id"] is not None else None
+    if data["client_id"] is not None and not client:
         raise HTTPException(status_code=400, detail="Selected client does not exist")
+    if client:
+        data["category"] = client.category or "Client"
+    ensure_master_value(session, Category, data["category"], "category")
     return data
 
 
@@ -278,12 +282,12 @@ def get_task_or_404(task_id: int, session: Session) -> Task:
 
 
 def master_names(session: Session, model) -> list[str]:
-    statement = select(model).where(model.active == True).order_by(model.sort_order, model.name)  # noqa: E712
+    statement = select(model).where(model.active == True).order_by(model.name)  # noqa: E712
     return [item.name for item in session.exec(statement).all()]
 
 
 def master_items(session: Session, model) -> list[dict]:
-    statement = select(model).where(model.active == True).order_by(model.sort_order, model.name)  # noqa: E712
+    statement = select(model).where(model.active == True).order_by(model.name)  # noqa: E712
     return [{"id": item.id, "name": item.name} for item in session.exec(statement).all()]
 
 
@@ -302,15 +306,28 @@ def ensure_master_value(session: Session, model, value: str, label: str):
         raise HTTPException(status_code=400, detail=f"Invalid {label}: {value}")
 
 
-def normalize_client_data(client_data: ClientCreate | ClientUpdate) -> dict:
+def normalize_phone_number(value: str, label: str, required: bool = False) -> str:
+    digits = sub(r"\D", "", value or "")
+    if not digits:
+        if required:
+            raise HTTPException(status_code=400, detail=f"{label} is required")
+        return ""
+    if len(digits) != 10:
+        raise HTTPException(status_code=400, detail=f"{label} must be exactly 10 digits")
+    return digits
+
+
+def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Session) -> dict:
     data = client_data.model_dump()
     for key, value in data.items():
         if isinstance(value, str):
             data[key] = value.strip()
     if not data["name"]:
         raise HTTPException(status_code=400, detail="Client name is required")
-    if not data["phone"]:
-        raise HTTPException(status_code=400, detail="Client phone is required")
+    data["category"] = data["category"] or "Client"
+    ensure_master_value(session, Category, data["category"], "category")
+    data["phone"] = normalize_phone_number(data["phone"], "Mobile / SMS", required=True)
+    data["whatsapp"] = normalize_phone_number(data["whatsapp"], "WhatsApp")
     return data
 
 
@@ -645,7 +662,7 @@ def get_clients(include_inactive: bool = False, session: Session = Depends(get_s
 
 @router.post("/clients")
 def create_client(client_data: ClientCreate, session: Session = Depends(get_session)):
-    data = normalize_client_data(client_data)
+    data = normalize_client_data(client_data, session)
     existing = session.exec(select(Client).where(Client.name == data["name"])).first()
     if existing:
         raise HTTPException(status_code=400, detail="Client name already exists")
@@ -663,7 +680,7 @@ def update_client(client_id: int, client_data: ClientUpdate, session: Session = 
     client = session.get(Client, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
-    data = normalize_client_data(client_data)
+    data = normalize_client_data(client_data, session)
     duplicate = session.exec(select(Client).where(Client.name == data["name"], Client.id != client_id)).first()
     if duplicate:
         raise HTTPException(status_code=400, detail="Client name already exists")
@@ -671,6 +688,11 @@ def update_client(client_id: int, client_data: ClientUpdate, session: Session = 
         setattr(client, field, value)
     client.updated_at = now()
     session.add(client)
+    linked_tasks = session.exec(select(Task).where(Task.client_id == client.id)).all()
+    for task in linked_tasks:
+        task.category = client.category
+        task.updated_at = now()
+        session.add(task)
     log_activity(session, "UPDATED", "client", f"Updated client: {client.name}", client.id)
     session.commit()
     session.refresh(client)

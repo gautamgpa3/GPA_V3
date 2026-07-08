@@ -120,10 +120,6 @@
             <textarea id="taskDescription" rows="3"></textarea>
           </label>
           <div class="field-block">
-            <div class="field-head"><span>Category</span><button class="inline-link" id="quickAddCategoryBtn" type="button">Add</button></div>
-            <select id="taskCategory"></select>
-          </div>
-          <div class="field-block">
             <div class="field-head"><span>Client</span><button class="inline-link" id="quickAddClientBtn" type="button">Add</button></div>
             <select id="taskClient"></select>
           </div>
@@ -193,13 +189,17 @@
             <span>Name</span>
             <input id="clientName" required maxlength="200" />
           </label>
+          <div class="field-block">
+            <div class="field-head"><span>Category</span><button class="inline-link" id="quickAddClientCategoryBtn" type="button">Add</button></div>
+            <select id="clientCategory" required></select>
+          </div>
           <label>
             <span>Mobile / SMS</span>
-            <input id="clientPhone" required />
+            <input id="clientPhone" required inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
           </label>
           <label>
             <span>WhatsApp</span>
-            <input id="clientWhatsapp" />
+            <input id="clientWhatsapp" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
           </label>
           <label>
             <span>GST No.</span>

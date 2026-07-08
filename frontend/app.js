@@ -20,8 +20,10 @@ const state = {
   briefing: null,
   conversation: [],
   resumeTaskDraft: null,
+  resumeClientDraft: null,
   resumeTaskAfterClient: false,
   resumeTaskAfterMasterType: "",
+  resumeClientAfterMasterType: "",
   dashboardMetric: "",
   master: {
     categories: [],
@@ -62,8 +64,8 @@ const els = {
   searchInput: document.querySelector("#searchInput"),
   notificationBtn: document.querySelector("#notificationBtn"),
   exportBtn: document.querySelector("#exportBtn"),
-  quickAddCategoryBtn: document.querySelector("#quickAddCategoryBtn"),
   quickAddClientBtn: document.querySelector("#quickAddClientBtn"),
+  quickAddClientCategoryBtn: document.querySelector("#quickAddClientCategoryBtn"),
   quickAddPriorityBtn: document.querySelector("#quickAddPriorityBtn"),
   quickAddStatusBtn: document.querySelector("#quickAddStatusBtn"),
   quickAddRepeatBtn: document.querySelector("#quickAddRepeatBtn"),
@@ -88,7 +90,6 @@ const els = {
     id: document.querySelector("#taskId"),
     title: document.querySelector("#taskTitle"),
     description: document.querySelector("#taskDescription"),
-    category: document.querySelector("#taskCategory"),
     client_id: document.querySelector("#taskClient"),
     priority: document.querySelector("#taskPriority"),
     status: document.querySelector("#taskStatus"),
@@ -104,6 +105,7 @@ const els = {
   clientFields: {
     id: document.querySelector("#clientId"),
     name: document.querySelector("#clientName"),
+    category: document.querySelector("#clientCategory"),
     phone: document.querySelector("#clientPhone"),
     whatsapp: document.querySelector("#clientWhatsapp"),
     address: document.querySelector("#clientAddress"),
@@ -314,7 +316,7 @@ async function loadTasks() {
 
 async function loadClients() {
   const clients = await api(API_CLIENTS_URL);
-  state.clients = Array.isArray(clients) ? clients : [];
+  state.clients = Array.isArray(clients) ? sortedItems(clients) : [];
 }
 
 async function loadMessageSchedules() {
@@ -356,23 +358,58 @@ function clientForTask(task) {
 }
 
 function phoneDigits(value = "") {
-  return String(value).replace(/[^\d]/g, "");
+  return String(value).replace(/[^\d]/g, "").slice(0, 10);
+}
+
+function normalizePhoneInput(field) {
+  field.value = phoneDigits(field.value);
+}
+
+function isTenDigitPhone(value) {
+  return /^\d{10}$/.test(value);
+}
+
+function byName(a, b) {
+  return String(a.name || a).localeCompare(String(b.name || b), undefined, { sensitivity: "base" });
+}
+
+function sortedValues(values = []) {
+  return [...values].sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: "base" }));
+}
+
+function sortedItems(items = []) {
+  return [...items].sort(byName);
+}
+
+function selectedClient() {
+  const id = els.fields.client_id?.value;
+  if (!id) return null;
+  return state.clients.find((client) => Number(client.id) === Number(id)) || null;
+}
+
+function selectedTaskCategory() {
+  return selectedClient()?.category || "Client";
 }
 
 function populateScheduleClients(selectedIds = []) {
   const selected = new Set(selectedIds.map(Number));
-  els.scheduleFields.client_ids.innerHTML = state.clients
+  els.scheduleFields.client_ids.innerHTML = sortedItems(state.clients)
     .map((client) => `<option value="${client.id}" ${selected.has(Number(client.id)) ? "selected" : ""}>${escapeHtml(client.name)}</option>`)
     .join("");
 }
 
 function populateMasterControls() {
-  els.fields.category.innerHTML = optionTags(state.master.categories);
+  state.master.categories = sortedValues(state.master.categories);
+  state.master.priorities = sortedValues(state.master.priorities);
+  state.master.statuses = sortedValues(state.master.statuses);
+  state.master.repeat_types = sortedValues(state.master.repeat_types);
+  state.master.owners = sortedValues(state.master.owners);
   els.fields.priority.innerHTML = optionTags(state.master.priorities);
   els.fields.status.innerHTML = optionTags(state.master.statuses);
   els.fields.repeat_type.innerHTML = optionTags(state.master.repeat_types);
   els.fields.owner.innerHTML = optionTags(state.master.owners);
-  els.fields.client_id.innerHTML = `<option value="">No client</option>${state.clients
+  els.clientFields.category.innerHTML = optionTags(state.master.categories);
+  els.fields.client_id.innerHTML = `<option value="">No client</option>${sortedItems(state.clients)
     .map((client) => `<option value="${client.id}">${escapeHtml(client.name)}</option>`)
     .join("")}`;
   populateScheduleClients();
@@ -680,7 +717,7 @@ function renderReports() {
   const active = state.tasks.filter((task) => !taskDerived(task).isDone);
   const byStatus = state.master.statuses.map((status) => [status, state.tasks.filter((task) => task.status === status).length]);
   const byPriority = state.master.priorities.map((priority) => [priority, state.tasks.filter((task) => task.priority === priority).length]);
-  const byCategory = [...new Set(state.tasks.map((task) => task.category || "Client"))].map((category) => [category, state.tasks.filter((task) => (task.category || "Client") === category).length]);
+  const byCategory = sortedValues([...new Set(state.tasks.map((task) => task.category || "Client"))]).map((category) => [category, state.tasks.filter((task) => (task.category || "Client") === category).length]);
   const aging = active.map((task) => ({ task, age: taskDerived(task).age })).sort((a, b) => b.age - a.age).slice(0, 6);
 
   els.views.reports.innerHTML = `
@@ -956,7 +993,7 @@ function renderClients() {
                 <div class="task-row">
                   <div>
                     <button class="task-title" data-action="edit-client" data-id="${client.id}">${escapeHtml(client.name)}</button>
-                    <div class="task-meta">${escapeHtml(client.phone || "No phone")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
+                    <div class="task-meta">${escapeHtml(client.category || "Client")} - ${escapeHtml(client.phone || "No phone")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
                     ${client.birth_date ? `<div class="task-meta">Birth date: ${formatDate(client.birth_date)}</div>` : ""}
                   </div>
                 </div>
@@ -1178,7 +1215,7 @@ function openTaskDialog(task = null) {
     id: "",
     title: "",
     description: "",
-    category: state.master.categories[0] || "Client",
+    category: "Client",
     client_id: "",
     priority: state.master.priorities[0] || "Normal",
     status: state.master.statuses[0] || "Pending",
@@ -1204,7 +1241,7 @@ function readForm() {
   return {
     title: els.fields.title.value.trim(),
     description: els.fields.description.value.trim(),
-    category: els.fields.category.value || "Client",
+    category: selectedTaskCategory(),
     priority: els.fields.priority.value,
     status: els.fields.status.value,
     client_id: els.fields.client_id.value ? Number(els.fields.client_id.value) : null,
@@ -1232,6 +1269,17 @@ function resumeTaskDraft() {
   if (draft) openTaskDialog(draft);
 }
 
+function currentClientDraft() {
+  return { id: els.clientFields.id.value, ...readClientForm() };
+}
+
+function resumeClientDraft() {
+  const draft = state.resumeClientDraft;
+  state.resumeClientDraft = null;
+  state.resumeClientAfterMasterType = "";
+  if (draft) openClientDialog(draft);
+}
+
 function quickAddClientFromTask() {
   state.resumeTaskDraft = currentTaskDraft();
   state.resumeTaskAfterClient = true;
@@ -1246,6 +1294,13 @@ function quickAddMasterFromTask(type) {
   window.setTimeout(() => openMasterDialog(type), 0);
 }
 
+function quickAddMasterFromClient(type) {
+  state.resumeClientDraft = currentClientDraft();
+  state.resumeClientAfterMasterType = type;
+  closeDialog(els.clientDialog, els.clientForm, { skipConfirm: true });
+  window.setTimeout(() => openMasterDialog(type), 0);
+}
+
 function openClientDialog(client = null) {
   els.clientForm.reset();
   els.deleteClientBtn.hidden = !client;
@@ -1253,6 +1308,7 @@ function openClientDialog(client = null) {
   const defaults = {
     id: "",
     name: "",
+    category: state.master.categories[0] || "Client",
     phone: "",
     whatsapp: "",
     address: "",
@@ -1271,8 +1327,9 @@ function openClientDialog(client = null) {
 function readClientForm() {
   return {
     name: els.clientFields.name.value.trim(),
-    phone: els.clientFields.phone.value.trim(),
-    whatsapp: els.clientFields.whatsapp.value.trim(),
+    category: els.clientFields.category.value || "Client",
+    phone: phoneDigits(els.clientFields.phone.value),
+    whatsapp: phoneDigits(els.clientFields.whatsapp.value),
     address: els.clientFields.address.value.trim(),
     gst_no: els.clientFields.gst_no.value.trim(),
     work_scope: els.clientFields.work_scope.value.trim(),
@@ -1285,6 +1342,16 @@ async function saveClientForm(event) {
   event.preventDefault();
   const payload = readClientForm();
   if (!payload.name) return;
+  if (!isTenDigitPhone(payload.phone)) {
+    window.alert("Mobile / SMS must be exactly 10 digits.");
+    els.clientFields.phone.focus();
+    return;
+  }
+  if (payload.whatsapp && !isTenDigitPhone(payload.whatsapp)) {
+    window.alert("WhatsApp must be exactly 10 digits.");
+    els.clientFields.whatsapp.focus();
+    return;
+  }
   const id = els.clientFields.id.value;
   if (!window.confirm(`${id ? "Edit" : "Add"} client "${payload.name}"?`)) return;
   const savedClient = await api(id ? `${API_CLIENTS_URL}/${id}` : API_CLIENTS_URL, {
@@ -1293,6 +1360,7 @@ async function saveClientForm(event) {
   });
   if (state.resumeTaskAfterClient && state.resumeTaskDraft && savedClient?.id) {
     state.resumeTaskDraft.client_id = savedClient.id;
+    state.resumeTaskDraft.category = savedClient.category || "Client";
   }
   await loadClients();
   await loadDueMessages();
@@ -1426,6 +1494,9 @@ async function saveMasterForm(event) {
     };
     const taskField = taskFieldByMasterType[type];
     if (taskField) state.resumeTaskDraft[taskField] = savedItem.name;
+  }
+  if (state.resumeClientAfterMasterType && state.resumeClientDraft && type === "categories" && savedItem?.name) {
+    state.resumeClientDraft.category = savedItem.name;
   }
   await loadMasterData();
   await loadTasks();
@@ -1677,6 +1748,7 @@ function exportCSV() {
     "Status",
     "Client ID",
     "Client Name",
+    "Client Category",
     "Client Mobile",
     "Client WhatsApp",
     "Client GST No.",
@@ -1716,6 +1788,7 @@ function exportCSV() {
       task.status,
       task.client_id,
       client?.name,
+      client?.category,
       client?.phone,
       client?.whatsapp,
       client?.gst_no,
@@ -1768,6 +1841,7 @@ function exportCSV() {
       task.status || "",
       task.client_id || "",
       client?.name,
+      client?.category,
       client?.phone,
       client?.whatsapp,
       client?.gst_no,
@@ -1814,10 +1888,12 @@ function bindEvents() {
   bindDialogGuard(els.masterDialog, els.masterForm);
 
   els.clientDialog.addEventListener("close", () => {
+    if (state.resumeClientAfterMasterType) return;
     if (state.resumeTaskAfterClient) resumeTaskDraft();
   });
   els.masterDialog.addEventListener("close", () => {
     if (state.resumeTaskAfterMasterType) resumeTaskDraft();
+    if (state.resumeClientAfterMasterType) resumeClientDraft();
   });
 
   els.navItems.forEach((item) =>
@@ -1827,8 +1903,8 @@ function bindEvents() {
     })
   );
   els.quickAddBtn.addEventListener("click", () => openTaskDialog());
-  els.quickAddCategoryBtn.addEventListener("click", () => quickAddMasterFromTask("categories"));
   els.quickAddClientBtn.addEventListener("click", quickAddClientFromTask);
+  els.quickAddClientCategoryBtn.addEventListener("click", () => quickAddMasterFromClient("categories"));
   els.quickAddPriorityBtn.addEventListener("click", () => quickAddMasterFromTask("priorities"));
   els.quickAddStatusBtn.addEventListener("click", () => quickAddMasterFromTask("statuses"));
   els.quickAddRepeatBtn.addEventListener("click", () => quickAddMasterFromTask("repeat-types"));
@@ -1849,6 +1925,9 @@ function bindEvents() {
   });
   els.form.addEventListener("submit", saveForm);
   els.clientForm.addEventListener("submit", saveClientForm);
+  [els.clientFields.phone, els.clientFields.whatsapp].forEach((field) => {
+    field.addEventListener("input", () => normalizePhoneInput(field));
+  });
   els.scheduleForm.addEventListener("submit", saveScheduleForm);
   els.masterForm.addEventListener("submit", saveMasterForm);
   els.deleteTaskBtn.addEventListener("click", () => {
