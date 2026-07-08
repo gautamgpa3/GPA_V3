@@ -61,6 +61,8 @@ const els = {
   searchInput: document.querySelector("#searchInput"),
   notificationBtn: document.querySelector("#notificationBtn"),
   exportBtn: document.querySelector("#exportBtn"),
+  quickAddCategoryBtn: document.querySelector("#quickAddCategoryBtn"),
+  quickAddClientBtn: document.querySelector("#quickAddClientBtn"),
   dialog: document.querySelector("#taskDialog"),
   form: document.querySelector("#taskForm"),
   dialogTitle: document.querySelector("#dialogTitle"),
@@ -1188,14 +1190,14 @@ function quickAddClientFromTask() {
   state.resumeTaskDraft = currentTaskDraft();
   state.resumeTaskAfterClient = true;
   els.dialog.close();
-  openClientDialog();
+  window.setTimeout(() => openClientDialog(), 0);
 }
 
 function quickAddCategoryFromTask() {
   state.resumeTaskDraft = currentTaskDraft();
   state.resumeTaskAfterCategory = true;
   els.dialog.close();
-  openMasterDialog("categories");
+  window.setTimeout(() => openMasterDialog("categories"), 0);
 }
 
 function openClientDialog(client = null) {
@@ -1771,6 +1773,8 @@ function bindEvents() {
     })
   );
   els.quickAddBtn.addEventListener("click", () => openTaskDialog());
+  els.quickAddCategoryBtn.addEventListener("click", quickAddCategoryFromTask);
+  els.quickAddClientBtn.addEventListener("click", quickAddClientFromTask);
   els.parseQuickBtn.addEventListener("click", captureQuick);
   els.quickInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") captureQuick();
@@ -1801,14 +1805,6 @@ function bindEvents() {
     if (!target) return;
     if (target.dataset.action === "metric-details") {
       showDashboardMetric(target.dataset.metric);
-      return;
-    }
-    if (target.dataset.action === "quick-add-client") {
-      quickAddClientFromTask();
-      return;
-    }
-    if (target.dataset.action === "quick-add-category") {
-      quickAddCategoryFromTask();
       return;
     }
     if (target.dataset.action === "add-client") {

@@ -972,7 +972,8 @@ dialog::backdrop {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-label {
+label,
+.field-block {
   color: var(--muted);
   display: grid;
   font-size: 12px;
@@ -981,7 +982,8 @@ label {
   text-transform: uppercase;
 }
 
-label.full {
+label.full,
+.field-block.full {
   grid-column: 1 / -1;
 }
 
@@ -990,6 +992,10 @@ label.full {
   display: flex;
   justify-content: space-between;
   gap: 8px;
+}
+
+.field-head span {
+  margin: 0;
 }
 
 .inline-link {
@@ -1011,7 +1017,10 @@ label.full {
 
 label input,
 label select,
-label textarea {
+label textarea,
+.field-block input,
+.field-block select,
+.field-block textarea {
   background: var(--control);
   border: 1px solid var(--line);
   border-radius: 8px;
