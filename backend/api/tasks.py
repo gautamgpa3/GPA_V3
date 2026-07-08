@@ -104,7 +104,11 @@ class MessageTemplateUpdate(BaseModel):
 
 MASTER_MODELS = {
     "categories": Category,
+    "priorities": Priority,
+    "statuses": Status,
     "owners": Owner,
+    "repeat-types": RepeatType,
+    "repeat_types": RepeatType,
 }
 
 
@@ -554,7 +558,10 @@ def get_master_data(session: Session = Depends(get_session)):
         "owners": master_names(session, Owner),
         "repeat_types": master_names(session, RepeatType),
         "category_items": master_items(session, Category),
+        "priority_items": master_items(session, Priority),
+        "status_items": master_items(session, Status),
         "owner_items": master_items(session, Owner),
+        "repeat_type_items": master_items(session, RepeatType),
     }
 
 

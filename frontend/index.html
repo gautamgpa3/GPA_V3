@@ -127,14 +127,14 @@
             <div class="field-head"><span>Client</span><button class="inline-link" id="quickAddClientBtn" type="button">Add</button></div>
             <select id="taskClient"></select>
           </div>
-          <label>
-            <span>Priority</span>
+          <div class="field-block">
+            <div class="field-head"><span>Priority</span><button class="inline-link" id="quickAddPriorityBtn" type="button">Add</button></div>
             <select id="taskPriority"></select>
-          </label>
-          <label>
-            <span>Status</span>
+          </div>
+          <div class="field-block">
+            <div class="field-head"><span>Status</span><button class="inline-link" id="quickAddStatusBtn" type="button">Add</button></div>
             <select id="taskStatus"></select>
-          </label>
+          </div>
           <label>
             <span>Start date</span>
             <input id="taskStart" type="date" required />
@@ -147,18 +147,18 @@
             <span>Reminder active</span>
             <input id="taskReminder" type="checkbox" checked />
           </label>
-          <label>
-            <span>Repeat</span>
+          <div class="field-block">
+            <div class="field-head"><span>Repeat</span><button class="inline-link" id="quickAddRepeatBtn" type="button">Add</button></div>
             <select id="taskRepeat"></select>
-          </label>
+          </div>
           <label>
             <span>Repeat every</span>
             <input id="taskRepeatEvery" type="number" min="1" max="365" value="1" />
           </label>
-          <label>
-            <span>Assigned / owner</span>
+          <div class="field-block">
+            <div class="field-head"><span>Assigned / owner</span><button class="inline-link" id="quickAddOwnerBtn" type="button">Add</button></div>
             <select id="taskOwner"></select>
-          </label>
+          </div>
           <label class="full">
             <span>Issue / current note</span>
             <textarea id="taskIssue" rows="3" placeholder="Example: Waiting for documents, approval, payment, acknowledgment..."></textarea>

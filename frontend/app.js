@@ -21,7 +21,7 @@ const state = {
   conversation: [],
   resumeTaskDraft: null,
   resumeTaskAfterClient: false,
-  resumeTaskAfterCategory: false,
+  resumeTaskAfterMasterType: "",
   dashboardMetric: "",
   master: {
     categories: [],
@@ -64,6 +64,10 @@ const els = {
   exportBtn: document.querySelector("#exportBtn"),
   quickAddCategoryBtn: document.querySelector("#quickAddCategoryBtn"),
   quickAddClientBtn: document.querySelector("#quickAddClientBtn"),
+  quickAddPriorityBtn: document.querySelector("#quickAddPriorityBtn"),
+  quickAddStatusBtn: document.querySelector("#quickAddStatusBtn"),
+  quickAddRepeatBtn: document.querySelector("#quickAddRepeatBtn"),
+  quickAddOwnerBtn: document.querySelector("#quickAddOwnerBtn"),
   dialog: document.querySelector("#taskDialog"),
   form: document.querySelector("#taskForm"),
   dialogTitle: document.querySelector("#dialogTitle"),
@@ -1004,6 +1008,16 @@ function masterList(title, type, items) {
   `;
 }
 
+function masterTypeLabel(type) {
+  return {
+    categories: "category",
+    priorities: "priority",
+    statuses: "status",
+    owners: "assignee",
+    "repeat-types": "repeat type",
+  }[type] || "item";
+}
+
 const TEMPLATE_VARIABLES = {
   client_general: [
     ["client_name", "Client name"],
@@ -1115,7 +1129,10 @@ function renderSettings() {
   els.views.settings.innerHTML = `
     <div class="report-grid">
       ${masterList("Categories", "categories", state.master.category_items || [])}
+      ${masterList("Priorities", "priorities", state.master.priority_items || [])}
+      ${masterList("Statuses", "statuses", state.master.status_items || [])}
       ${masterList("Assigned to / staff", "owners", state.master.owner_items || [])}
+      ${masterList("Repeat types", "repeat-types", state.master.repeat_type_items || [])}
     </div>
     ${messageTemplateList()}
   `;
@@ -1211,7 +1228,7 @@ function resumeTaskDraft() {
   const draft = state.resumeTaskDraft;
   state.resumeTaskDraft = null;
   state.resumeTaskAfterClient = false;
-  state.resumeTaskAfterCategory = false;
+  state.resumeTaskAfterMasterType = "";
   if (draft) openTaskDialog(draft);
 }
 
@@ -1222,11 +1239,11 @@ function quickAddClientFromTask() {
   window.setTimeout(() => openClientDialog(), 0);
 }
 
-function quickAddCategoryFromTask() {
+function quickAddMasterFromTask(type) {
   state.resumeTaskDraft = currentTaskDraft();
-  state.resumeTaskAfterCategory = true;
+  state.resumeTaskAfterMasterType = type;
   closeDialog(els.dialog, els.form, { skipConfirm: true });
-  window.setTimeout(() => openMasterDialog("categories"), 0);
+  window.setTimeout(() => openMasterDialog(type), 0);
 }
 
 function openClientDialog(client = null) {
@@ -1383,7 +1400,7 @@ function openMasterDialog(type, item = null) {
   els.masterFields.id.value = item?.id || "";
   els.masterFields.name.value = item?.name || "";
   els.deleteMasterBtn.hidden = !item;
-  els.masterDialogTitle.textContent = `${item ? "Edit" : "Add"} ${type === "owners" ? "assignee" : "category"}`;
+  els.masterDialogTitle.textContent = `${item ? "Edit" : "Add"} ${masterTypeLabel(type)}`;
   els.masterDialog.showModal();
   markDialogClean(els.masterDialog, els.masterForm);
 }
@@ -1394,13 +1411,21 @@ async function saveMasterForm(event) {
   const id = els.masterFields.id.value;
   const name = els.masterFields.name.value.trim();
   if (!type || !name) return;
-  if (!window.confirm(`${id ? "Edit" : "Add"} ${type === "owners" ? "assignee" : "category"} "${name}"?`)) return;
+  if (!window.confirm(`${id ? "Edit" : "Add"} ${masterTypeLabel(type)} "${name}"?`)) return;
   const savedItem = await api(id ? `${API_MASTER_DATA_URL}/${type}/${id}` : `${API_MASTER_DATA_URL}/${type}`, {
     method: id ? "PUT" : "POST",
     body: JSON.stringify(id ? { name, active: true } : { name }),
   });
-  if (state.resumeTaskAfterCategory && state.resumeTaskDraft && type === "categories" && savedItem?.name) {
-    state.resumeTaskDraft.category = savedItem.name;
+  if (state.resumeTaskAfterMasterType && state.resumeTaskDraft && savedItem?.name) {
+    const taskFieldByMasterType = {
+      categories: "category",
+      priorities: "priority",
+      statuses: "status",
+      owners: "owner",
+      "repeat-types": "repeat_type",
+    };
+    const taskField = taskFieldByMasterType[type];
+    if (taskField) state.resumeTaskDraft[taskField] = savedItem.name;
   }
   await loadMasterData();
   await loadTasks();
@@ -1792,7 +1817,7 @@ function bindEvents() {
     if (state.resumeTaskAfterClient) resumeTaskDraft();
   });
   els.masterDialog.addEventListener("close", () => {
-    if (state.resumeTaskAfterCategory) resumeTaskDraft();
+    if (state.resumeTaskAfterMasterType) resumeTaskDraft();
   });
 
   els.navItems.forEach((item) =>
@@ -1802,8 +1827,12 @@ function bindEvents() {
     })
   );
   els.quickAddBtn.addEventListener("click", () => openTaskDialog());
-  els.quickAddCategoryBtn.addEventListener("click", quickAddCategoryFromTask);
+  els.quickAddCategoryBtn.addEventListener("click", () => quickAddMasterFromTask("categories"));
   els.quickAddClientBtn.addEventListener("click", quickAddClientFromTask);
+  els.quickAddPriorityBtn.addEventListener("click", () => quickAddMasterFromTask("priorities"));
+  els.quickAddStatusBtn.addEventListener("click", () => quickAddMasterFromTask("statuses"));
+  els.quickAddRepeatBtn.addEventListener("click", () => quickAddMasterFromTask("repeat-types"));
+  els.quickAddOwnerBtn.addEventListener("click", () => quickAddMasterFromTask("owners"));
   els.parseQuickBtn.addEventListener("click", captureQuick);
   els.quickInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter") captureQuick();
