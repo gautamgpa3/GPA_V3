@@ -22,6 +22,7 @@ const state = {
   resumeTaskDraft: null,
   resumeTaskAfterClient: false,
   resumeTaskAfterCategory: false,
+  dashboardMetric: "",
   master: {
     categories: [],
     priorities: [],
@@ -219,13 +220,29 @@ function markDialogClean(dialog, form) {
   dialogSnapshots.set(dialog, formSnapshot(form));
 }
 
-function isDialogDirty(dialog, form) {
-  return dialog.open && dialogSnapshots.get(dialog) !== formSnapshot(form);
+function confirmDiscardDialog(dialog, form) {
+  if (!dialog.open) return true;
+  return window.confirm("Are you sure you want to exit without saving?");
 }
 
-function confirmDiscardDialog(dialog, form) {
-  if (!isDialogDirty(dialog, form)) return true;
-  return window.confirm("Are you sure you want to exit without saving?");
+function closeDialog(dialog, form, { skipConfirm = false } = {}) {
+  if (!skipConfirm && !confirmDiscardDialog(dialog, form)) return false;
+  markDialogClean(dialog, form);
+  dialog.close();
+  return true;
+}
+
+function closeDialogFromButton(button) {
+  const dialog = button.closest("dialog");
+  if (!dialog) return;
+  const pairs = new Map([
+    [els.dialog, els.form],
+    [els.clientDialog, els.clientForm],
+    [els.scheduleDialog, els.scheduleForm],
+    [els.masterDialog, els.masterForm],
+  ]);
+  const form = pairs.get(dialog);
+  if (form) closeDialog(dialog, form);
 }
 
 function priorityWeight(priority) {
@@ -416,7 +433,7 @@ async function deleteTask(task) {
   await loadTasks();
   await loadDueMessages();
   await loadActivity();
-  els.dialog.close();
+  closeDialog(els.dialog, els.form, { skipConfirm: true });
   render();
 }
 
@@ -490,24 +507,44 @@ function dashboardMetricTasks(metric) {
   return groups[metric] || ["Tasks", []];
 }
 
-function taskDetailLine(task) {
-  const client = clientName(task.client_id) || "No client";
-  return `- ${task.title} - ${client} - ${task.status} - due ${formatDate(task.due_date)}`;
-}
-
 function showDashboardMetric(metric) {
-  const [title, tasks] = dashboardMetricTasks(metric);
-  const lines = tasks.length ? tasks.map(taskDetailLine).join("\n") : "No tasks in this group.";
-  window.alert(`${title}: ${tasks.length}\n\n${lines}`);
+  state.dashboardMetric = metric;
+  renderDashboard();
 }
 
 function metricCard(label, value, metric) {
-  return `<button class="metric metric-button" data-action="metric-details" data-metric="${metric}" type="button"><span>${label}</span><strong>${value}</strong></button>`;
+  return `<button class="metric metric-button ${state.dashboardMetric === metric ? "active-metric" : ""}" data-action="metric-details" data-metric="${metric}" type="button"><span>${label}</span><strong>${value}</strong></button>`;
+}
+
+function metricDetailsPanel() {
+  if (!state.dashboardMetric) return "";
+  const [title, tasks] = dashboardMetricTasks(state.dashboardMetric);
+  return `
+    <div class="panel metric-detail-panel">
+      <div class="panel-head">
+        <h3>${escapeHtml(title)}</h3>
+        <span class="mini">${tasks.length} item${tasks.length === 1 ? "" : "s"}</span>
+      </div>
+      ${
+        tasks.length
+          ? `<div class="task-list">${tasks
+              .map(
+                (task) => `
+                  <div class="metric-detail-row">
+                    <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(task.title)}</button>
+                    <div class="task-meta">${escapeHtml(clientName(task.client_id) || "No client")} - ${escapeHtml(task.status)} - due ${formatDate(task.due_date)}</div>
+                  </div>
+                `
+              )
+              .join("")}</div>`
+          : renderTaskList([], "No tasks in this group")
+      }
+    </div>
+  `;
 }
 
 function renderDashboard() {
   const stats = getStats();
-  const briefing = state.briefing;
   const active = state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
   const today = active.filter((task) => taskDerived(task).activeToday);
   const overdue = active.filter((task) => taskDerived(task).overdue);
@@ -522,16 +559,8 @@ function renderDashboard() {
       ${metricCard("Active", stats.active, "active")}
       ${metricCard("Blocked / issue", stats.blocked, "blocked")}
     </div>
+    ${metricDetailsPanel()}
     <div class="content-grid">
-      <div class="panel">
-        <div class="panel-head"><h3>Good Morning Gautam</h3><span class="mini">${briefing?.date || todayISO()}</span></div>
-        <div class="briefing-list">
-          <div><strong>${briefing?.pending_count ?? stats.active}</strong><span>Pending tasks</span></div>
-          <div><strong>${briefing?.meeting_count ?? 0}</strong><span>Meetings</span></div>
-          <div><strong>${briefing?.bni_tomorrow_count ?? 0}</strong><span>BNI tomorrow</span></div>
-          <div><strong>${briefing?.overdue_count ?? stats.overdue}</strong><span>Overdue</span></div>
-        </div>
-      </div>
       <div class="panel">
         <div class="panel-head"><h3>Today's pending work</h3><span class="mini">${today.length} active items</span></div>
         ${renderTaskList(today, "No pending work for today")}
@@ -1189,14 +1218,14 @@ function resumeTaskDraft() {
 function quickAddClientFromTask() {
   state.resumeTaskDraft = currentTaskDraft();
   state.resumeTaskAfterClient = true;
-  els.dialog.close();
+  closeDialog(els.dialog, els.form, { skipConfirm: true });
   window.setTimeout(() => openClientDialog(), 0);
 }
 
 function quickAddCategoryFromTask() {
   state.resumeTaskDraft = currentTaskDraft();
   state.resumeTaskAfterCategory = true;
-  els.dialog.close();
+  closeDialog(els.dialog, els.form, { skipConfirm: true });
   window.setTimeout(() => openMasterDialog("categories"), 0);
 }
 
@@ -1252,7 +1281,7 @@ async function saveClientForm(event) {
   await loadDueMessages();
   await loadActivity();
   populateMasterControls();
-  els.clientDialog.close();
+  closeDialog(els.clientDialog, els.clientForm, { skipConfirm: true });
   render();
 }
 
@@ -1265,7 +1294,7 @@ async function deleteClientFromDialog() {
   await loadDueMessages();
   await loadActivity();
   populateMasterControls();
-  els.clientDialog.close();
+  closeDialog(els.clientDialog, els.clientForm, { skipConfirm: true });
   render();
 }
 
@@ -1333,7 +1362,7 @@ async function saveScheduleForm(event) {
   await loadMessageSchedules();
   await loadDueMessages();
   await loadActivity();
-  els.scheduleDialog.close();
+  closeDialog(els.scheduleDialog, els.scheduleForm, { skipConfirm: true });
   render();
 }
 
@@ -1344,7 +1373,7 @@ async function deleteScheduleFromDialog() {
   await loadMessageSchedules();
   await loadDueMessages();
   await loadActivity();
-  els.scheduleDialog.close();
+  closeDialog(els.scheduleDialog, els.scheduleForm, { skipConfirm: true });
   render();
 }
 
@@ -1377,7 +1406,7 @@ async function saveMasterForm(event) {
   await loadTasks();
   await loadActivity();
   populateMasterControls();
-  els.masterDialog.close();
+  closeDialog(els.masterDialog, els.masterForm, { skipConfirm: true });
   render();
 }
 
@@ -1389,7 +1418,7 @@ async function deleteMasterFromDialog() {
   await loadMasterData();
   await loadActivity();
   populateMasterControls();
-  els.masterDialog.close();
+  closeDialog(els.masterDialog, els.masterForm, { skipConfirm: true });
   render();
 }
 
@@ -1464,7 +1493,7 @@ async function saveForm(event) {
   await loadTasks();
   await loadDueMessages();
   await loadActivity();
-  els.dialog.close();
+  closeDialog(els.dialog, els.form, { skipConfirm: true });
   render();
   sendTaskStageWhatsApp(savedTask, id ? "updated" : "created", previousTask);
 }
@@ -1802,6 +1831,11 @@ function bindEvents() {
   els.deleteMasterBtn.addEventListener("click", deleteMasterFromDialog);
   document.body.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
+    const closeButton = event.target.closest("[data-close-dialog]");
+    if (closeButton) {
+      closeDialogFromButton(closeButton);
+      return;
+    }
     if (!target) return;
     if (target.dataset.action === "metric-details") {
       showDashboardMetric(target.dataset.metric);

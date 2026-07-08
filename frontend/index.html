@@ -106,7 +106,7 @@
             <p class="eyebrow">Work details</p>
             <h3 id="dialogTitle">Add work</h3>
           </div>
-          <button class="icon-button" value="cancel" formnovalidate title="Close">X</button>
+          <button class="icon-button" data-close-dialog type="button" title="Close">X</button>
         </div>
 
         <input type="hidden" id="taskId" />
@@ -172,8 +172,8 @@
         <div class="dialog-actions">
           <button class="danger-button" id="deleteTaskBtn" type="button">Delete</button>
           <div class="spacer"></div>
-          <button class="secondary-button" value="cancel" formnovalidate>Cancel</button>
-          <button class="primary-button" id="saveTaskBtn" value="default">Save work</button>
+          <button class="secondary-button" data-close-dialog type="button">Cancel</button>
+          <button class="primary-button" id="saveTaskBtn" type="submit">Save work</button>
         </div>
       </form>
     </dialog>
@@ -185,7 +185,7 @@
             <p class="eyebrow">Client details</p>
             <h3 id="clientDialogTitle">Add client</h3>
           </div>
-          <button class="icon-button" value="cancel" formnovalidate title="Close">X</button>
+          <button class="icon-button" data-close-dialog type="button" title="Close">X</button>
         </div>
         <input type="hidden" id="clientId" />
         <div class="form-grid">
@@ -221,8 +221,8 @@
         <div class="dialog-actions">
           <button class="danger-button" id="deleteClientBtn" type="button">Delete</button>
           <div class="spacer"></div>
-          <button class="secondary-button" value="cancel" formnovalidate>Cancel</button>
-          <button class="primary-button" value="default">Save client</button>
+          <button class="secondary-button" data-close-dialog type="button">Cancel</button>
+          <button class="primary-button" type="submit">Save client</button>
         </div>
       </form>
     </dialog>
@@ -234,7 +234,7 @@
             <p class="eyebrow">Client messages</p>
             <h3 id="scheduleDialogTitle">Add schedule</h3>
           </div>
-          <button class="icon-button" value="cancel" formnovalidate title="Close">X</button>
+          <button class="icon-button" data-close-dialog type="button" title="Close">X</button>
         </div>
         <input type="hidden" id="scheduleId" />
         <div class="form-grid">
@@ -305,8 +305,8 @@
         <div class="dialog-actions">
           <button class="danger-button" id="deleteScheduleBtn" type="button">Delete</button>
           <div class="spacer"></div>
-          <button class="secondary-button" value="cancel" formnovalidate>Cancel</button>
-          <button class="primary-button" value="default">Save schedule</button>
+          <button class="secondary-button" data-close-dialog type="button">Cancel</button>
+          <button class="primary-button" type="submit">Save schedule</button>
         </div>
       </form>
     </dialog>
@@ -318,7 +318,7 @@
             <p class="eyebrow">Master data</p>
             <h3 id="masterDialogTitle">Add item</h3>
           </div>
-          <button class="icon-button" value="cancel" formnovalidate title="Close">X</button>
+          <button class="icon-button" data-close-dialog type="button" title="Close">X</button>
         </div>
         <input type="hidden" id="masterType" />
         <input type="hidden" id="masterId" />
@@ -329,8 +329,8 @@
         <div class="dialog-actions">
           <button class="danger-button" id="deleteMasterBtn" type="button">Delete</button>
           <div class="spacer"></div>
-          <button class="secondary-button" value="cancel" formnovalidate>Cancel</button>
-          <button class="primary-button" value="default">Save</button>
+          <button class="secondary-button" data-close-dialog type="button">Cancel</button>
+          <button class="primary-button" type="submit">Save</button>
         </div>
       </form>
     </dialog>

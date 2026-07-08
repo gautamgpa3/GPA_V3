@@ -493,6 +493,11 @@ button {
   transform: translateY(-1px);
 }
 
+.metric-button.active-metric {
+  border-color: var(--accent);
+  box-shadow: 0 14px 34px rgba(255, 25, 55, 0.2);
+}
+
 .metric::before,
 .panel::before {
   animation: statusFlow 7s linear infinite;
@@ -535,6 +540,17 @@ button {
   overflow: hidden;
   padding: 14px;
   position: relative;
+}
+
+.metric-detail-panel {
+  margin-bottom: 12px;
+}
+
+.metric-detail-row {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
 }
 
 .panel-head {
