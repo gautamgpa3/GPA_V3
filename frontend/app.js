@@ -584,7 +584,7 @@ function renderDashboard() {
       <div class="panel">
         <div class="panel-head"><h3>AI suggestions</h3><span class="mini">From your data</span></div>
         <div class="task-list">
-          ${(briefing?.suggestions || ["Ask: good morning, prepare me for today's meetings, or I'm going to meet Kalpesh."])
+          ${(state.briefing?.suggestions || ["Ask: good morning, prepare me for today's meetings, or I'm going to meet Kalpesh."])
             .map((suggestion) => `<div class="task-note">${escapeHtml(suggestion)}</div>`)
             .join("")}
         </div>
