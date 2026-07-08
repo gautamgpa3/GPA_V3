@@ -370,7 +370,31 @@ function isTenDigitPhone(value) {
 }
 
 function gstNumber(value = "") {
-  return String(value).replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 15);
+  const chars = String(value).replace(/[^a-z0-9]/gi, "").toUpperCase().split("");
+  const rules = [
+    /[0-9]/,
+    /[0-9]/,
+    /[A-Z]/,
+    /[A-Z]/,
+    /[A-Z]/,
+    /[A-Z]/,
+    /[A-Z]/,
+    /[0-9]/,
+    /[0-9]/,
+    /[0-9]/,
+    /[0-9]/,
+    /[A-Z]/,
+    /[1-9A-Z]/,
+    /Z/,
+    /[0-9A-Z]/,
+  ];
+  let result = "";
+  for (const char of chars) {
+    const rule = rules[result.length];
+    if (!rule) break;
+    if (rule.test(char)) result += char;
+  }
+  return result;
 }
 
 function normalizeGstInput(field) {
