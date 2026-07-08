@@ -19,6 +19,9 @@ const state = {
   activity: [],
   briefing: null,
   conversation: [],
+  resumeTaskDraft: null,
+  resumeTaskAfterClient: false,
+  resumeTaskAfterCategory: false,
   master: {
     categories: [],
     priorities: [],
@@ -35,6 +38,8 @@ const state = {
   },
   search: "",
 };
+
+const dialogSnapshots = new WeakMap();
 
 const els = {
   todayLabel: document.querySelector("#todayLabel"),
@@ -191,6 +196,34 @@ function formatTimestamp(value) {
 
 function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[char]);
+}
+
+function formSnapshot(form) {
+  return JSON.stringify(
+    Array.from(form.elements)
+      .filter((field) => field.id || field.name)
+      .map((field) => [
+        field.id || field.name,
+        field.type === "checkbox"
+          ? field.checked
+          : field.multiple
+            ? Array.from(field.selectedOptions).map((option) => option.value)
+            : field.value,
+      ])
+  );
+}
+
+function markDialogClean(dialog, form) {
+  dialogSnapshots.set(dialog, formSnapshot(form));
+}
+
+function isDialogDirty(dialog, form) {
+  return dialog.open && dialogSnapshots.get(dialog) !== formSnapshot(form);
+}
+
+function confirmDiscardDialog(dialog, form) {
+  if (!isDialogDirty(dialog, form)) return true;
+  return window.confirm("Are you sure you want to exit without saving?");
 }
 
 function priorityWeight(priority) {
@@ -443,6 +476,33 @@ function getStats() {
   };
 }
 
+function dashboardMetricTasks(metric) {
+  const active = state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
+  const groups = {
+    today: ["Today's pending", active.filter((task) => taskDerived(task).activeToday)],
+    dueToday: ["Due today", active.filter((task) => diffDays(task.due_date) === 0)],
+    overdue: ["Overdue", active.filter((task) => taskDerived(task).overdue)],
+    active: ["Active", active],
+    blocked: ["Blocked / issue", active.filter((task) => task.status === "Blocked" || task.issue)],
+  };
+  return groups[metric] || ["Tasks", []];
+}
+
+function taskDetailLine(task) {
+  const client = clientName(task.client_id) || "No client";
+  return `- ${task.title} - ${client} - ${task.status} - due ${formatDate(task.due_date)}`;
+}
+
+function showDashboardMetric(metric) {
+  const [title, tasks] = dashboardMetricTasks(metric);
+  const lines = tasks.length ? tasks.map(taskDetailLine).join("\n") : "No tasks in this group.";
+  window.alert(`${title}: ${tasks.length}\n\n${lines}`);
+}
+
+function metricCard(label, value, metric) {
+  return `<button class="metric metric-button" data-action="metric-details" data-metric="${metric}" type="button"><span>${label}</span><strong>${value}</strong></button>`;
+}
+
 function renderDashboard() {
   const stats = getStats();
   const briefing = state.briefing;
@@ -454,11 +514,11 @@ function renderDashboard() {
 
   els.views.dashboard.innerHTML = `
     <div class="metric-grid">
-      <div class="metric"><span>Today's pending</span><strong>${stats.today}</strong></div>
-      <div class="metric"><span>Due today</span><strong>${stats.dueToday}</strong></div>
-      <div class="metric"><span>Overdue</span><strong>${stats.overdue}</strong></div>
-      <div class="metric"><span>Active</span><strong>${stats.active}</strong></div>
-      <div class="metric"><span>Blocked / issue</span><strong>${stats.blocked}</strong></div>
+      ${metricCard("Today's pending", stats.today, "today")}
+      ${metricCard("Due today", stats.dueToday, "dueToday")}
+      ${metricCard("Overdue", stats.overdue, "overdue")}
+      ${metricCard("Active", stats.active, "active")}
+      ${metricCard("Blocked / issue", stats.blocked, "blocked")}
     </div>
     <div class="content-grid">
       <div class="panel">
@@ -747,6 +807,30 @@ function sendTaskStageWhatsApp(task, stage, previousTask = null) {
   const phone = prepared.client.whatsapp || prepared.client.phone;
   if (!phone) return;
   openPreparedMessage("whatsapp", phone, prepared.message);
+}
+
+function bindDialogGuard(dialog, form) {
+  form.addEventListener(
+    "click",
+    (event) => {
+      const cancelButton = event.target.closest('button[value="cancel"]');
+      if (!cancelButton) return;
+      if (!confirmDiscardDialog(dialog, form)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      markDialogClean(dialog, form);
+    },
+    true
+  );
+  dialog.addEventListener("cancel", (event) => {
+    if (!confirmDiscardDialog(dialog, form)) {
+      event.preventDefault();
+      return;
+    }
+    markDialogClean(dialog, form);
+  });
 }
 
 function scheduleWhen(schedule) {
@@ -1065,6 +1149,7 @@ function openTaskDialog(task = null) {
     else field.value = data[key] ?? "";
   });
   els.dialog.showModal();
+  markDialogClean(els.dialog, els.form);
 }
 
 function readForm() {
@@ -1087,6 +1172,32 @@ function readForm() {
   };
 }
 
+function currentTaskDraft() {
+  return { id: els.fields.id.value, ...readForm() };
+}
+
+function resumeTaskDraft() {
+  const draft = state.resumeTaskDraft;
+  state.resumeTaskDraft = null;
+  state.resumeTaskAfterClient = false;
+  state.resumeTaskAfterCategory = false;
+  if (draft) openTaskDialog(draft);
+}
+
+function quickAddClientFromTask() {
+  state.resumeTaskDraft = currentTaskDraft();
+  state.resumeTaskAfterClient = true;
+  els.dialog.close();
+  openClientDialog();
+}
+
+function quickAddCategoryFromTask() {
+  state.resumeTaskDraft = currentTaskDraft();
+  state.resumeTaskAfterCategory = true;
+  els.dialog.close();
+  openMasterDialog("categories");
+}
+
 function openClientDialog(client = null) {
   els.clientForm.reset();
   els.deleteClientBtn.hidden = !client;
@@ -1106,6 +1217,7 @@ function openClientDialog(client = null) {
     field.value = data[key] ?? "";
   });
   els.clientDialog.showModal();
+  markDialogClean(els.clientDialog, els.clientForm);
 }
 
 function readClientForm() {
@@ -1127,10 +1239,13 @@ async function saveClientForm(event) {
   if (!payload.name) return;
   const id = els.clientFields.id.value;
   if (!window.confirm(`${id ? "Edit" : "Add"} client "${payload.name}"?`)) return;
-  await api(id ? `${API_CLIENTS_URL}/${id}` : API_CLIENTS_URL, {
+  const savedClient = await api(id ? `${API_CLIENTS_URL}/${id}` : API_CLIENTS_URL, {
     method: id ? "PUT" : "POST",
     body: JSON.stringify(payload),
   });
+  if (state.resumeTaskAfterClient && state.resumeTaskDraft && savedClient?.id) {
+    state.resumeTaskDraft.client_id = savedClient.id;
+  }
   await loadClients();
   await loadDueMessages();
   await loadActivity();
@@ -1182,6 +1297,7 @@ function openScheduleDialog(schedule = null) {
   els.scheduleFields.active.checked = Boolean(data.active);
   populateScheduleClients(data.client_ids || []);
   els.scheduleDialog.showModal();
+  markDialogClean(els.scheduleDialog, els.scheduleForm);
 }
 
 function readScheduleForm() {
@@ -1238,6 +1354,7 @@ function openMasterDialog(type, item = null) {
   els.deleteMasterBtn.hidden = !item;
   els.masterDialogTitle.textContent = `${item ? "Edit" : "Add"} ${type === "owners" ? "assignee" : "category"}`;
   els.masterDialog.showModal();
+  markDialogClean(els.masterDialog, els.masterForm);
 }
 
 async function saveMasterForm(event) {
@@ -1247,10 +1364,13 @@ async function saveMasterForm(event) {
   const name = els.masterFields.name.value.trim();
   if (!type || !name) return;
   if (!window.confirm(`${id ? "Edit" : "Add"} ${type === "owners" ? "assignee" : "category"} "${name}"?`)) return;
-  await api(id ? `${API_MASTER_DATA_URL}/${type}/${id}` : `${API_MASTER_DATA_URL}/${type}`, {
+  const savedItem = await api(id ? `${API_MASTER_DATA_URL}/${type}/${id}` : `${API_MASTER_DATA_URL}/${type}`, {
     method: id ? "PUT" : "POST",
     body: JSON.stringify(id ? { name, active: true } : { name }),
   });
+  if (state.resumeTaskAfterCategory && state.resumeTaskDraft && type === "categories" && savedItem?.name) {
+    state.resumeTaskDraft.category = savedItem.name;
+  }
   await loadMasterData();
   await loadTasks();
   await loadActivity();
@@ -1632,6 +1752,18 @@ function exportCSV() {
 }
 
 function bindEvents() {
+  bindDialogGuard(els.dialog, els.form);
+  bindDialogGuard(els.clientDialog, els.clientForm);
+  bindDialogGuard(els.scheduleDialog, els.scheduleForm);
+  bindDialogGuard(els.masterDialog, els.masterForm);
+
+  els.clientDialog.addEventListener("close", () => {
+    if (state.resumeTaskAfterClient) resumeTaskDraft();
+  });
+  els.masterDialog.addEventListener("close", () => {
+    if (state.resumeTaskAfterCategory) resumeTaskDraft();
+  });
+
   els.navItems.forEach((item) =>
     item.addEventListener("click", () => {
       state.currentView = item.dataset.view;
@@ -1667,6 +1799,18 @@ function bindEvents() {
   document.body.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
     if (!target) return;
+    if (target.dataset.action === "metric-details") {
+      showDashboardMetric(target.dataset.metric);
+      return;
+    }
+    if (target.dataset.action === "quick-add-client") {
+      quickAddClientFromTask();
+      return;
+    }
+    if (target.dataset.action === "quick-add-category") {
+      quickAddCategoryFromTask();
+      return;
+    }
     if (target.dataset.action === "add-client") {
       openClientDialog();
       return;

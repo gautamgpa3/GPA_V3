@@ -479,6 +479,20 @@ button {
   position: relative;
 }
 
+.metric-button {
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+}
+
+.metric-button:hover,
+.metric-button:focus-visible {
+  border-color: rgba(255, 59, 59, 0.76);
+  transform: translateY(-1px);
+}
+
 .metric::before,
 .panel::before {
   animation: statusFlow 7s linear infinite;
@@ -969,6 +983,30 @@ label {
 
 label.full {
   grid-column: 1 / -1;
+}
+
+.field-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.inline-link {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  padding: 0;
+  text-transform: uppercase;
+}
+
+.inline-link:hover,
+.inline-link:focus-visible {
+  color: var(--accent-2);
+  text-decoration: underline;
 }
 
 label input,
