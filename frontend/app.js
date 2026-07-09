@@ -477,6 +477,25 @@ function taskDerived(task) {
   return { daysLeft, age, hasStarted, activeToday, overdue, dueSoon, attention, isDone };
 }
 
+function openTasks() {
+  return state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
+}
+
+function pendingTasks() {
+  return openTasks().filter((task) => {
+    const derived = taskDerived(task);
+    return derived.hasStarted && !derived.overdue;
+  });
+}
+
+function todaysPendingTasks() {
+  return pendingTasks().filter((task) => diffDays(task.start_date || todayISO()) === 0 || diffDays(task.due_date) === 0);
+}
+
+function overdueTasks() {
+  return openTasks().filter((task) => taskDerived(task).overdue);
+}
+
 function filteredTasks() {
   const q = state.search.trim().toLowerCase();
   return state.tasks
@@ -574,27 +593,30 @@ function renderTaskList(tasks, emptyText = "No matching work") {
 }
 
 function getStats() {
-  const active = state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
+  const open = openTasks();
+  const pending = pendingTasks();
+  const overdue = overdueTasks();
   return {
     total: state.tasks.length,
-    active: active.length,
-    today: active.filter((task) => taskDerived(task).activeToday).length,
-    dueToday: active.filter((task) => diffDays(task.due_date) === 0).length,
-    overdue: active.filter((task) => taskDerived(task).overdue).length,
-    blocked: active.filter((task) => task.status === "Blocked" || task.issue).length,
+    active: pending.length,
+    today: todaysPendingTasks().length,
+    dueToday: open.filter((task) => diffDays(task.due_date) === 0).length,
+    overdue: overdue.length,
+    blocked: open.filter((task) => task.status === "Blocked" || task.issue).length,
     completed: state.tasks.filter((task) => task.status === "Completed").length,
     recurring: state.tasks.filter((task) => task.repeat_type && task.repeat_type !== "None").length,
   };
 }
 
 function dashboardMetricTasks(metric) {
-  const active = state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
+  const open = openTasks();
+  const pending = pendingTasks();
   const groups = {
-    today: ["Today's pending", active.filter((task) => taskDerived(task).activeToday)],
-    dueToday: ["Due today", active.filter((task) => diffDays(task.due_date) === 0)],
-    overdue: ["Overdue", active.filter((task) => taskDerived(task).overdue)],
-    active: ["Open total", active],
-    blocked: ["Blocked / issue", active.filter((task) => task.status === "Blocked" || task.issue)],
+    today: ["Today's pending", todaysPendingTasks()],
+    dueToday: ["Due today", open.filter((task) => diffDays(task.due_date) === 0)],
+    overdue: ["Overdue", overdueTasks()],
+    active: ["Pending work", pending],
+    blocked: ["Blocked / issue", open.filter((task) => task.status === "Blocked" || task.issue)],
   };
   return groups[metric] || ["Tasks", []];
 }
@@ -637,24 +659,24 @@ function metricDetailsPanel() {
 
 function renderDashboard() {
   const stats = getStats();
-  const active = state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
-  const today = active.filter((task) => taskDerived(task).activeToday);
-  const overdue = active.filter((task) => taskDerived(task).overdue);
-  const soon = active.filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !taskDerived(task).activeToday);
-  const blocked = active.filter((task) => task.status === "Blocked" || task.issue);
+  const open = openTasks();
+  const today = todaysPendingTasks();
+  const overdue = overdueTasks();
+  const soon = pendingTasks().filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !today.includes(task));
+  const blocked = open.filter((task) => task.status === "Blocked" || task.issue);
 
   els.views.dashboard.innerHTML = `
     <div class="metric-grid">
       ${metricCard("Today's pending", stats.today, "today")}
       ${metricCard("Due today", stats.dueToday, "dueToday")}
       ${metricCard("Overdue", stats.overdue, "overdue")}
-      ${metricCard("Open total", stats.active, "active")}
+      ${metricCard("Pending work", stats.active, "active")}
       ${metricCard("Blocked / issue", stats.blocked, "blocked")}
     </div>
     ${metricDetailsPanel()}
     <div class="content-grid">
       <div class="panel">
-        <div class="panel-head"><h3>Today's pending work</h3><span class="mini">${today.length} visible today</span></div>
+        <div class="panel-head"><h3>Today's pending work</h3><span class="mini">${today.length} starting or due today</span></div>
         ${renderTaskList(today, "No pending work for today")}
       </div>
       <div class="panel">
@@ -779,7 +801,7 @@ function renderReports() {
       <div class="report-card"><h3>Assigned to report</h3>${state.master.owners.map((owner) => reportLine(owner, state.tasks.filter((task) => task.owner === owner && !taskDerived(task).isDone).length, Math.max(stats.active, 1))).join("")}</div>
       <div class="report-card"><h3>Aging report</h3>${aging.length ? aging.map(({ task, age }) => `<p class="task-meta"><strong>${escapeHtml(task.title)}</strong><br>${age} active days - due ${formatDate(task.due_date)}</p>`).join("") : "<p class='task-meta'>No active aging yet.</p>"}</div>
       <div class="report-card"><h3>Alert report</h3>${reportLine("Today's pending", stats.today, Math.max(stats.active, 1))}${reportLine("Due today", stats.dueToday, Math.max(stats.active, 1))}${reportLine("Overdue", stats.overdue, Math.max(stats.active, 1))}${reportLine("Blocked / issue", stats.blocked, Math.max(stats.active, 1))}</div>
-      <div class="report-card"><h3>Completion report</h3>${reportLine("Completed", stats.completed, Math.max(stats.total, 1))}${reportLine("Open total", stats.active, Math.max(stats.total, 1))}${reportLine("Recurring", stats.recurring, Math.max(stats.total, 1))}</div>
+      <div class="report-card"><h3>Completion report</h3>${reportLine("Completed", stats.completed, Math.max(stats.total, 1))}${reportLine("Pending work", stats.active, Math.max(stats.total, 1))}${reportLine("Recurring", stats.recurring, Math.max(stats.total, 1))}</div>
     </div>
   `;
 }
