@@ -308,6 +308,10 @@ def ensure_master_value(session: Session, model, value: str, label: str):
 
 def normalize_phone_number(value: str, label: str, required: bool = False) -> str:
     digits = sub(r"\D", "", value or "")
+    if len(digits) == 12 and digits.startswith("91"):
+        digits = digits[2:]
+    if len(digits) == 11 and digits.startswith("0"):
+        digits = digits[1:]
     if not digits:
         if required:
             raise HTTPException(status_code=400, detail=f"{label} is required")

@@ -358,7 +358,15 @@ function clientForTask(task) {
 }
 
 function phoneDigits(value = "") {
-  return String(value).replace(/[^\d]/g, "").slice(0, 10);
+  let digits = String(value).replace(/[^\d]/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  return digits.slice(0, 10);
+}
+
+function whatsappPhoneNumber(value = "") {
+  const digits = phoneDigits(value);
+  return digits ? `91${digits}` : "";
 }
 
 function normalizePhoneInput(field) {
@@ -841,7 +849,7 @@ function sendClientMessage(clientId, channel, source) {
 
   const encoded = encodeURIComponent(message);
   if (channel === "whatsapp") {
-    window.open(`https://wa.me/${phone}?text=${encoded}`, "_blank", "noopener,noreferrer");
+    window.open(`https://wa.me/${whatsappPhoneNumber(phone)}?text=${encoded}`, "_blank", "noopener,noreferrer");
     return;
   }
   window.location.href = `sms:${phone}?body=${encoded}`;
@@ -852,7 +860,7 @@ function openPreparedMessage(channel, phone, message) {
   if (!digits || !message) return;
   const encoded = encodeURIComponent(message);
   if (channel === "whatsapp") {
-    window.open(`https://wa.me/${digits}?text=${encoded}`, "_blank", "noopener,noreferrer");
+    window.open(`https://wa.me/${whatsappPhoneNumber(digits)}?text=${encoded}`, "_blank", "noopener,noreferrer");
     return;
   }
   window.location.href = `sms:${digits}?body=${encoded}`;
