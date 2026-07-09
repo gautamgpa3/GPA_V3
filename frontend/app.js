@@ -299,7 +299,13 @@ async function api(path, options = {}) {
   });
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(detail || `Request failed: ${response.status}`);
+    let message = detail;
+    try {
+      message = JSON.parse(detail).detail || detail;
+    } catch {
+      message = detail;
+    }
+    throw new Error(message || `Request failed: ${response.status}`);
   }
   return response.status === 204 ? null : response.json();
 }
@@ -1529,10 +1535,16 @@ async function saveMasterForm(event) {
   const name = els.masterFields.name.value.trim();
   if (!type || !name) return;
   if (!window.confirm(`${id ? "Edit" : "Add"} ${masterTypeLabel(type)} "${name}"?`)) return;
-  const savedItem = await api(id ? `${API_MASTER_DATA_URL}/${type}/${id}` : `${API_MASTER_DATA_URL}/${type}`, {
-    method: id ? "PUT" : "POST",
-    body: JSON.stringify(id ? { name, active: true } : { name }),
-  });
+  let savedItem;
+  try {
+    savedItem = await api(id ? `${API_MASTER_DATA_URL}/${type}/${id}` : `${API_MASTER_DATA_URL}/${type}`, {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(id ? { name, active: true } : { name }),
+    });
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
   if (state.resumeTaskAfterMasterType && state.resumeTaskDraft && savedItem?.name) {
     const taskFieldByMasterType = {
       categories: "category",
@@ -1558,8 +1570,13 @@ async function saveMasterForm(event) {
 async function deleteMasterFromDialog() {
   const type = els.masterFields.type.value;
   const id = els.masterFields.id.value;
-  if (!type || !id || !window.confirm("Delete this item from future dropdowns?")) return;
-  await api(`${API_MASTER_DATA_URL}/${type}/${id}`, { method: "DELETE" });
+  if (!type || !id || !window.confirm("Delete this item? GPA will block deletion if it is used anywhere.")) return;
+  try {
+    await api(`${API_MASTER_DATA_URL}/${type}/${id}`, { method: "DELETE" });
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
   await loadMasterData();
   await loadActivity();
   populateMasterControls();

@@ -112,6 +112,15 @@ MASTER_MODELS = {
     "repeat_types": RepeatType,
 }
 
+MASTER_USAGE = {
+    "categories": [(Client, "category"), (Task, "category")],
+    "priorities": [(Task, "priority")],
+    "statuses": [(Task, "status")],
+    "owners": [(Task, "owner")],
+    "repeat-types": [(Task, "repeat_type")],
+    "repeat_types": [(Task, "repeat_type")],
+}
+
 
 def now() -> datetime:
     return datetime.now()
@@ -296,6 +305,31 @@ def get_master_model(master_type: str):
     if not model:
         raise HTTPException(status_code=404, detail="Master data type not found")
     return model
+
+
+def master_usage_counts(session: Session, master_type: str, name: str) -> list[tuple[str, int]]:
+    counts = []
+    for model, field in MASTER_USAGE.get(master_type, []):
+        statement = select(model).where(getattr(model, field) == name)
+        count = len(session.exec(statement).all())
+        if count:
+            counts.append((model.__tablename__, count))
+    return counts
+
+
+def master_usage_message(name: str, counts: list[tuple[str, int]]) -> str:
+    details = ", ".join(f"{count} {table.replace('_', ' ')}" for table, count in counts)
+    return f'Cannot delete "{name}" because it is used in {details}. Edit it instead if the name should change.'
+
+
+def cascade_master_rename(session: Session, master_type: str, old_name: str, new_name: str):
+    for model, field in MASTER_USAGE.get(master_type, []):
+        records = session.exec(select(model).where(getattr(model, field) == old_name)).all()
+        for record in records:
+            setattr(record, field, new_name)
+            if hasattr(record, "updated_at"):
+                record.updated_at = now()
+            session.add(record)
 
 
 def ensure_master_value(session: Session, model, value: str, label: str):
@@ -645,10 +679,22 @@ def update_master_item(master_type: str, item_id: int, item_data: MasterItemUpda
     item = session.get(model, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Master data item not found")
-    item.name = item_data.name.strip()
+    old_name = item.name
+    new_name = item_data.name.strip()
+    duplicate = session.exec(select(model).where(model.name == new_name, model.id != item_id)).first()
+    if duplicate:
+        raise HTTPException(status_code=400, detail=f'Master data item "{new_name}" already exists')
+    if item.active and not item_data.active:
+        usage = master_usage_counts(session, master_type, old_name)
+        if usage:
+            raise HTTPException(status_code=400, detail=master_usage_message(old_name, usage))
+    if old_name != new_name:
+        cascade_master_rename(session, master_type, old_name, new_name)
+    item.name = new_name
     item.active = item_data.active
     session.add(item)
-    log_activity(session, "UPDATED", master_type, f"Updated {master_type}: {item.name}", item.id)
+    details = f"{old_name} -> {new_name}" if old_name != new_name else ""
+    log_activity(session, "UPDATED", master_type, f"Updated {master_type}: {item.name}", item.id, details=details)
     session.commit()
     session.refresh(item)
     return item
@@ -660,6 +706,9 @@ def delete_master_item(master_type: str, item_id: int, session: Session = Depend
     item = session.get(model, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Master data item not found")
+    usage = master_usage_counts(session, master_type, item.name)
+    if usage:
+        raise HTTPException(status_code=400, detail=master_usage_message(item.name, usage))
     item.active = False
     session.add(item)
     log_activity(session, "DELETED", master_type, f"Deleted {master_type}: {item.name}", item.id)
