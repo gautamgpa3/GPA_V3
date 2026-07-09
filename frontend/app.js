@@ -539,13 +539,14 @@ function taskCard(task) {
   if (d.dueSoon) classes.push("due-soon");
   if (d.isDone) classes.push("completed");
   const dayText = d.overdue ? `${Math.abs(d.daysLeft)} days overdue` : d.daysLeft === 0 ? "Due today" : task.due_date ? `${d.daysLeft} days left` : "No due date";
+  const startText = d.hasStarted ? `Active ${d.age} days` : `Starts in ${diffDays(task.start_date)} days`;
   const repeatText = task.repeat_type === "None" ? "One-time" : task.repeat_type === "Custom Days" ? `Every ${task.repeat_every} days` : task.repeat_type;
   return `
     <article class="${classes.join(" ")}" data-id="${task.id}">
       <div class="task-row">
         <div>
           <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(task.title)}</button>
-          <div class="task-meta">${escapeHtml(task.category)}${task.client_id ? ` - ${escapeHtml(clientName(task.client_id))}` : ""} - ${formatDate(task.due_date)} - Active ${d.age} days</div>
+          <div class="task-meta">${escapeHtml(task.category)}${task.client_id ? ` - ${escapeHtml(clientName(task.client_id))}` : ""} - ${formatDate(task.due_date)} - ${startText}</div>
         </div>
         ${d.isDone ? "" : `<button class="icon-button" data-action="complete" data-id="${task.id}" title="Mark complete">OK</button>`}
       </div>
@@ -592,7 +593,7 @@ function dashboardMetricTasks(metric) {
     today: ["Today's pending", active.filter((task) => taskDerived(task).activeToday)],
     dueToday: ["Due today", active.filter((task) => diffDays(task.due_date) === 0)],
     overdue: ["Overdue", active.filter((task) => taskDerived(task).overdue)],
-    active: ["Active", active],
+    active: ["Open total", active],
     blocked: ["Blocked / issue", active.filter((task) => task.status === "Blocked" || task.issue)],
   };
   return groups[metric] || ["Tasks", []];
@@ -647,13 +648,13 @@ function renderDashboard() {
       ${metricCard("Today's pending", stats.today, "today")}
       ${metricCard("Due today", stats.dueToday, "dueToday")}
       ${metricCard("Overdue", stats.overdue, "overdue")}
-      ${metricCard("Active", stats.active, "active")}
+      ${metricCard("Open total", stats.active, "active")}
       ${metricCard("Blocked / issue", stats.blocked, "blocked")}
     </div>
     ${metricDetailsPanel()}
     <div class="content-grid">
       <div class="panel">
-        <div class="panel-head"><h3>Today's pending work</h3><span class="mini">${today.length} active items</span></div>
+        <div class="panel-head"><h3>Today's pending work</h3><span class="mini">${today.length} visible today</span></div>
         ${renderTaskList(today, "No pending work for today")}
       </div>
       <div class="panel">
@@ -778,7 +779,7 @@ function renderReports() {
       <div class="report-card"><h3>Assigned to report</h3>${state.master.owners.map((owner) => reportLine(owner, state.tasks.filter((task) => task.owner === owner && !taskDerived(task).isDone).length, Math.max(stats.active, 1))).join("")}</div>
       <div class="report-card"><h3>Aging report</h3>${aging.length ? aging.map(({ task, age }) => `<p class="task-meta"><strong>${escapeHtml(task.title)}</strong><br>${age} active days - due ${formatDate(task.due_date)}</p>`).join("") : "<p class='task-meta'>No active aging yet.</p>"}</div>
       <div class="report-card"><h3>Alert report</h3>${reportLine("Today's pending", stats.today, Math.max(stats.active, 1))}${reportLine("Due today", stats.dueToday, Math.max(stats.active, 1))}${reportLine("Overdue", stats.overdue, Math.max(stats.active, 1))}${reportLine("Blocked / issue", stats.blocked, Math.max(stats.active, 1))}</div>
-      <div class="report-card"><h3>Completion report</h3>${reportLine("Completed", stats.completed, Math.max(stats.total, 1))}${reportLine("Active", stats.active, Math.max(stats.total, 1))}${reportLine("Recurring", stats.recurring, Math.max(stats.total, 1))}</div>
+      <div class="report-card"><h3>Completion report</h3>${reportLine("Completed", stats.completed, Math.max(stats.total, 1))}${reportLine("Open total", stats.active, Math.max(stats.total, 1))}${reportLine("Recurring", stats.recurring, Math.max(stats.total, 1))}</div>
     </div>
   `;
 }
