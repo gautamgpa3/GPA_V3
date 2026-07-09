@@ -307,6 +307,20 @@ def get_master_model(master_type: str):
     return model
 
 
+def normalized_name(value: str) -> str:
+    return " ".join((value or "").strip().split()).casefold()
+
+
+def find_duplicate_by_name(session: Session, model, name: str, exclude_id: int | None = None):
+    target = normalized_name(name)
+    for item in session.exec(select(model)).all():
+        if exclude_id is not None and item.id == exclude_id:
+            continue
+        if normalized_name(item.name) == target:
+            return item
+    return None
+
+
 def master_usage_counts(session: Session, master_type: str, name: str) -> list[tuple[str, int]]:
     counts = []
     for model, field in MASTER_USAGE.get(master_type, []):
@@ -370,6 +384,7 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Ses
     for key, value in data.items():
         if isinstance(value, str):
             data[key] = value.strip()
+    data["name"] = " ".join(data["name"].split())
     if not data["name"]:
         raise HTTPException(status_code=400, detail="Client name is required")
     data["category"] = data["category"] or "Client"
@@ -654,9 +669,11 @@ def update_message_template(template_key: str, template_data: MessageTemplateUpd
 @router.post("/master-data/{master_type}")
 def create_master_item(master_type: str, item_data: MasterItemCreate, session: Session = Depends(get_session)):
     model = get_master_model(master_type)
-    name = item_data.name.strip()
-    existing = session.exec(select(model).where(model.name == name)).first()
+    name = " ".join(item_data.name.strip().split())
+    existing = find_duplicate_by_name(session, model, name)
     if existing:
+        if existing.active:
+            raise HTTPException(status_code=400, detail=f'Master data item "{existing.name}" already exists')
         existing.active = True
         session.add(existing)
         log_activity(session, "RESTORED", master_type, f"Restored {master_type}: {existing.name}", existing.id)
@@ -680,8 +697,8 @@ def update_master_item(master_type: str, item_id: int, item_data: MasterItemUpda
     if not item:
         raise HTTPException(status_code=404, detail="Master data item not found")
     old_name = item.name
-    new_name = item_data.name.strip()
-    duplicate = session.exec(select(model).where(model.name == new_name, model.id != item_id)).first()
+    new_name = " ".join(item_data.name.strip().split())
+    duplicate = find_duplicate_by_name(session, model, new_name, exclude_id=item_id)
     if duplicate:
         raise HTTPException(status_code=400, detail=f'Master data item "{new_name}" already exists')
     if item.active and not item_data.active:
@@ -727,7 +744,7 @@ def get_clients(include_inactive: bool = False, session: Session = Depends(get_s
 @router.post("/clients")
 def create_client(client_data: ClientCreate, session: Session = Depends(get_session)):
     data = normalize_client_data(client_data, session)
-    existing = session.exec(select(Client).where(Client.name == data["name"])).first()
+    existing = find_duplicate_by_name(session, Client, data["name"])
     if existing:
         raise HTTPException(status_code=400, detail="Client name already exists")
     client = Client(**data, updated_at=now())
@@ -745,7 +762,7 @@ def update_client(client_id: int, client_data: ClientUpdate, session: Session = 
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     data = normalize_client_data(client_data, session)
-    duplicate = session.exec(select(Client).where(Client.name == data["name"], Client.id != client_id)).first()
+    duplicate = find_duplicate_by_name(session, Client, data["name"], exclude_id=client_id)
     if duplicate:
         raise HTTPException(status_code=400, detail="Client name already exists")
     for field, value in data.items():

@@ -1409,10 +1409,16 @@ async function saveClientForm(event) {
   }
   const id = els.clientFields.id.value;
   if (!window.confirm(`${id ? "Edit" : "Add"} client "${payload.name}"?`)) return;
-  const savedClient = await api(id ? `${API_CLIENTS_URL}/${id}` : API_CLIENTS_URL, {
-    method: id ? "PUT" : "POST",
-    body: JSON.stringify(payload),
-  });
+  let savedClient;
+  try {
+    savedClient = await api(id ? `${API_CLIENTS_URL}/${id}` : API_CLIENTS_URL, {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
   if (state.resumeTaskAfterClient && state.resumeTaskDraft && savedClient?.id) {
     state.resumeTaskDraft.client_id = savedClient.id;
     state.resumeTaskDraft.category = savedClient.category || "Client";
