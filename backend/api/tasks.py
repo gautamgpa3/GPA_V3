@@ -557,10 +557,31 @@ def task_matches(task: Task, text: str) -> bool:
     return all(term in haystack for term in terms[:4]) if terms else False
 
 
+def task_status_key(task: Task) -> str:
+    return (task.status or "").strip().casefold()
+
+
+def task_is_done(task: Task) -> bool:
+    return task_status_key(task) in {"completed", "cancelled"}
+
+
+def task_has_started(task: Task, today: date | None = None) -> bool:
+    current = today or date.today()
+    return not task.start_date or task.start_date <= current
+
+
+def task_is_overdue(task: Task, today: date | None = None) -> bool:
+    current = today or date.today()
+    return bool(task.due_date and task.due_date < current and not task_is_done(task) and not task.archived)
+
+
+def task_is_pending(task: Task, today: date | None = None) -> bool:
+    return not task_is_done(task) and not task.archived and task_has_started(task, today) and not task_is_overdue(task, today)
+
+
 def active_tasks(session: Session) -> list[Task]:
-    return session.exec(
-        select(Task).where(Task.status != "Completed", Task.archived == False).order_by(Task.due_date, Task.priority)  # noqa: E712
-    ).all()
+    tasks = session.exec(select(Task).where(Task.archived == False).order_by(Task.due_date, Task.priority)).all()  # noqa: E712
+    return [task for task in tasks if not task_is_done(task)]
 
 
 def task_contains(task: Task, *terms: str) -> bool:
@@ -571,12 +592,13 @@ def task_contains(task: Task, *terms: str) -> bool:
 def build_briefing(session: Session) -> dict:
     today = date.today()
     tomorrow = today + timedelta(days=1)
-    tasks = active_tasks(session)
-    due_today = [task for task in tasks if task.due_date == today]
-    overdue = [task for task in tasks if task.due_date and task.due_date < today]
-    upcoming = [task for task in tasks if task.due_date and today < task.due_date <= today + timedelta(days=7)]
-    meetings = [task for task in tasks if task_contains(task, "meeting", "meet", "bni")]
-    bni_tomorrow = [task for task in tasks if task.due_date == tomorrow and task_contains(task, "bni")]
+    open_tasks = active_tasks(session)
+    pending = [task for task in open_tasks if task_is_pending(task, today)]
+    due_today = [task for task in pending if task.due_date == today]
+    overdue = [task for task in open_tasks if task_is_overdue(task, today)]
+    upcoming = [task for task in open_tasks if task.due_date and today < task.due_date <= today + timedelta(days=7)]
+    meetings = [task for task in pending if task_contains(task, "meeting", "meet", "bni")]
+    bni_tomorrow = [task for task in open_tasks if task.due_date == tomorrow and task_contains(task, "bni")]
     quotations_due = [task for task in due_today if task_contains(task, "quotation", "quote")]
     priorities = sorted(due_today + overdue, key=lambda item: (item.due_date or today, item.priority != "Urgent", item.priority != "High"))[:6]
 
@@ -593,17 +615,17 @@ def build_briefing(session: Session) -> dict:
     return {
         "greeting": "Good morning, Gautam.",
         "date": today.isoformat(),
-        "pending_count": len(tasks),
+        "pending_count": len(pending),
         "meeting_count": len(meetings),
         "bni_tomorrow_count": len(bni_tomorrow),
         "overdue_count": len(overdue),
         "due_today_count": len(due_today),
-        "tasks": tasks,
+        "tasks": pending,
         "priorities": priorities,
         "upcoming": upcoming[:6],
         "suggestions": suggestions,
         "message": (
-            f"Good morning, Gautam. You have {len(tasks)} pending task(s), "
+            f"Good morning, Gautam. You have {len(pending)} pending task(s), "
             f"{len(meetings)} meeting-related item(s), {len(bni_tomorrow)} BNI item(s) tomorrow, "
             f"and {len(overdue)} overdue follow-up(s)."
         ),
@@ -618,15 +640,16 @@ def client_context(session: Session, text: str) -> dict | None:
     tasks = session.exec(
         select(Task).where(Task.client_id == client.id, Task.archived == False).order_by(Task.due_date)  # noqa: E712
     ).all()
+    pending_tasks = [task for task in tasks if task_is_pending(task)]
     activity = session.exec(
         select(ActivityLog).where(ActivityLog.entity_type == "client", ActivityLog.entity_id == client.id).order_by(ActivityLog.created_at.desc()).limit(5)
     ).all()
     return {
         "client": client,
-        "pending_tasks": [task for task in tasks if task.status != "Completed"],
-        "completed_tasks": [task for task in tasks if task.status == "Completed"][:5],
+        "pending_tasks": pending_tasks,
+        "completed_tasks": [task for task in tasks if task_is_done(task)][:5],
         "activity": activity,
-        "message": f"{client.name}: {len([task for task in tasks if task.status != 'Completed'])} pending task(s). Work scope: {client.work_scope or 'not recorded'}.",
+        "message": f"{client.name}: {len(pending_tasks)} pending task(s). Work scope: {client.work_scope or 'not recorded'}.",
     }
 
 
@@ -1007,7 +1030,7 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
         }
 
     if any(phrase in lower for phrase in ("show pending", "pending tasks", "what work is pending", "what is pending")):
-        tasks = active_tasks(session)
+        tasks = [task for task in active_tasks(session) if task_is_pending(task)]
         return {
             "action": "ANSWER",
             "message": f"{len(tasks)} pending task(s).",
@@ -1015,11 +1038,11 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
         }
 
     if lower.startswith("how many") and "pending" in lower:
-        count = len(session.exec(select(Task).where(Task.status != "Completed", Task.archived == False)).all())  # noqa: E712
+        count = len([task for task in active_tasks(session) if task_is_pending(task)])
         return {"action": "ANSWER", "message": f"{count} pending task(s) remain."}
 
     if lower.startswith("complete") or lower.startswith("mark") and "complete" in lower:
-        candidates = session.exec(select(Task).where(Task.status != "Completed", Task.archived == False).order_by(Task.due_date)).all()  # noqa: E712
+        candidates = active_tasks(session)
         task = next((item for item in candidates if task_matches(item, lower)), candidates[0] if candidates and "first" in lower else None)
         if not task:
             return {"action": "NEEDS_CLARIFICATION", "message": "I could not find the task to complete."}
