@@ -358,6 +358,11 @@ function clientName(clientId) {
   return state.clients.find((client) => Number(client.id) === Number(clientId))?.name || "";
 }
 
+function taskDisplayTitle(task) {
+  const client = clientName(task.client_id);
+  return client ? `${task.title} - ${client}` : task.title;
+}
+
 function clientForTask(task) {
   if (!task.client_id) return null;
   return state.clients.find((client) => Number(client.id) === Number(task.client_id)) || null;
@@ -528,7 +533,7 @@ function filteredTasks() {
 }
 
 async function completeTask(task) {
-  if (!window.confirm(`Mark "${task.title}" as completed?`)) return;
+  if (!window.confirm(`Mark "${taskDisplayTitle(task)}" as completed?`)) return;
   const completedTask = normalizeTask(await api(`${API_TASKS_URL}/${task.id}/complete`, { method: "PUT" }));
   await loadTasks();
   await loadDueMessages();
@@ -538,7 +543,7 @@ async function completeTask(task) {
 }
 
 async function deleteTask(task) {
-  if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
+  if (!window.confirm(`Delete "${taskDisplayTitle(task)}"? This cannot be undone.`)) return;
   await api(`${API_TASKS_URL}/${task.id}`, { method: "DELETE" });
   await loadTasks();
   await loadDueMessages();
@@ -564,8 +569,8 @@ function taskCard(task) {
     <article class="${classes.join(" ")}" data-id="${task.id}">
       <div class="task-row">
         <div>
-          <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(task.title)}</button>
-          <div class="task-meta">${escapeHtml(task.category)}${task.client_id ? ` - ${escapeHtml(clientName(task.client_id))}` : ""} - ${formatDate(task.due_date)} - ${startText}</div>
+          <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(taskDisplayTitle(task))}</button>
+          <div class="task-meta">${escapeHtml(task.category)} - ${formatDate(task.due_date)} - ${startText}</div>
         </div>
         ${d.isDone ? "" : `<button class="icon-button" data-action="complete" data-id="${task.id}" title="Mark complete">OK</button>`}
       </div>
@@ -645,8 +650,8 @@ function metricDetailsPanel() {
               .map(
                 (task) => `
                   <div class="metric-detail-row">
-                    <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(task.title)}</button>
-                    <div class="task-meta">${escapeHtml(clientName(task.client_id) || "No client")} - ${escapeHtml(task.status)} - due ${formatDate(task.due_date)}</div>
+                    <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(taskDisplayTitle(task))}</button>
+                    <div class="task-meta">${escapeHtml(task.status)} - due ${formatDate(task.due_date)}</div>
                   </div>
                 `
               )
@@ -754,7 +759,7 @@ function renderCalendar() {
     cells.push(`
       <div class="day-cell ${iso === todayISO() ? "today" : ""}">
         <div class="day-num">${date.toLocaleDateString(undefined, { weekday: "short", day: "2-digit" })}</div>
-        ${tasks.map((task) => `<button class="day-task" data-action="edit" data-id="${task.id}" title="${escapeHtml(task.title)}">${escapeHtml(task.title)}</button>`).join("")}
+        ${tasks.map((task) => `<button class="day-task" data-action="edit" data-id="${task.id}" title="${escapeHtml(taskDisplayTitle(task))}">${escapeHtml(taskDisplayTitle(task))}</button>`).join("")}
       </div>
     `);
   }
@@ -799,7 +804,7 @@ function renderReports() {
       <div class="report-card"><h3>Priority report</h3>${byPriority.map(([label, value]) => reportLine(label, value, stats.total)).join("")}</div>
       <div class="report-card"><h3>Category report</h3>${byCategory.map(([label, value]) => reportLine(label, value, stats.total)).join("")}</div>
       <div class="report-card"><h3>Assigned to report</h3>${state.master.owners.map((owner) => reportLine(owner, state.tasks.filter((task) => task.owner === owner && !taskDerived(task).isDone).length, Math.max(stats.active, 1))).join("")}</div>
-      <div class="report-card"><h3>Aging report</h3>${aging.length ? aging.map(({ task, age }) => `<p class="task-meta"><strong>${escapeHtml(task.title)}</strong><br>${age} active days - due ${formatDate(task.due_date)}</p>`).join("") : "<p class='task-meta'>No active aging yet.</p>"}</div>
+      <div class="report-card"><h3>Aging report</h3>${aging.length ? aging.map(({ task, age }) => `<p class="task-meta"><strong>${escapeHtml(taskDisplayTitle(task))}</strong><br>${age} active days - due ${formatDate(task.due_date)}</p>`).join("") : "<p class='task-meta'>No active aging yet.</p>"}</div>
       <div class="report-card"><h3>Alert report</h3>${reportLine("Today's pending", stats.today, Math.max(stats.active, 1))}${reportLine("Due today", stats.dueToday, Math.max(stats.active, 1))}${reportLine("Overdue", stats.overdue, Math.max(stats.active, 1))}${reportLine("Blocked / issue", stats.blocked, Math.max(stats.active, 1))}</div>
       <div class="report-card"><h3>Completion report</h3>${reportLine("Completed", stats.completed, Math.max(stats.total, 1))}${reportLine("Pending work", stats.active, Math.max(stats.total, 1))}${reportLine("Recurring", stats.recurring, Math.max(stats.total, 1))}</div>
     </div>
@@ -838,7 +843,7 @@ function clientMessage(client, type) {
 
   if (type === "block") {
     messageContent = clientBlockers(client.id)
-      .map((task) => task.issue || task.notes || `${task.title} is blocked.`)
+      .map((task) => task.issue || task.notes || `${taskDisplayTitle(task)} is blocked.`)
       .filter(Boolean)
       .join("; ");
   }
@@ -1250,15 +1255,15 @@ function renderSettings() {
 
 function assistantResponseText(response) {
   if (response.action === "BRIEFING" && response.briefing) {
-    const priorities = (response.briefing.priorities || []).map((task) => task.title).slice(0, 4).join(", ");
+    const priorities = (response.briefing.priorities || []).map(taskDisplayTitle).slice(0, 4).join(", ");
     return `${response.message}${priorities ? ` Priorities: ${priorities}.` : ""}`;
   }
   if (response.action === "CLIENT_CONTEXT" && response.client) {
-    const pending = (response.pending_tasks || []).map((task) => task.title).slice(0, 4).join(", ");
+    const pending = (response.pending_tasks || []).map(taskDisplayTitle).slice(0, 4).join(", ");
     return `${response.message}${pending ? ` Pending: ${pending}.` : ""}`;
   }
   if (response.action === "MEETING_PREP") {
-    const tasks = (response.tasks || []).map((task) => task.title).slice(0, 5).join(", ");
+    const tasks = (response.tasks || []).map(taskDisplayTitle).slice(0, 5).join(", ");
     return `${response.message}${tasks ? ` Prepare for: ${tasks}.` : ""}`;
   }
   return response.message || "Done.";
