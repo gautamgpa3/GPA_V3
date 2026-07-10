@@ -604,7 +604,7 @@ function getStats() {
     overdue: overdue.length,
     blocked: open.filter((task) => task.status === "Blocked" || task.issue).length,
     completed: state.tasks.filter((task) => task.status === "Completed").length,
-    recurring: state.tasks.filter((task) => task.repeat_type && task.repeat_type !== "None").length,
+    recurring: open.filter((task) => task.repeat_type && task.repeat_type !== "None").length,
   };
 }
 
@@ -693,7 +693,7 @@ function renderDashboard() {
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Recurring work</h3><span class="mini">${stats.recurring} scheduled</span></div>
-        ${renderTaskList(active.filter((task) => task.repeat_type && task.repeat_type !== "None").slice(0, 8), "No recurring work yet")}
+        ${renderTaskList(open.filter((task) => task.repeat_type && task.repeat_type !== "None").slice(0, 8), "No recurring work yet")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>AI suggestions</h3><span class="mini">From your data</span></div>
