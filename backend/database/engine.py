@@ -6,6 +6,7 @@ from sqlmodel import SQLModel, Session, create_engine, select
 from backend.core.config import DATABASE_URL
 from backend.models.activity import ActivityLog
 from backend.models.client import Client
+from backend.models.contact import Contact
 from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
@@ -52,7 +53,20 @@ ACTIVITY_COLUMNS = {
 
 CLIENT_COLUMNS = {
     "category": "TEXT DEFAULT 'Client'",
+    "email": "TEXT DEFAULT ''",
     "birth_date": "DATE",
+}
+
+CONTACT_COLUMNS = {
+    "phone": "TEXT DEFAULT ''",
+    "whatsapp": "TEXT DEFAULT ''",
+    "email": "TEXT DEFAULT ''",
+    "company": "TEXT DEFAULT ''",
+    "address": "TEXT DEFAULT ''",
+    "notes": "TEXT DEFAULT ''",
+    "active": "BOOLEAN DEFAULT 1",
+    "created_at": "DATETIME",
+    "updated_at": "DATETIME",
 }
 
 MESSAGE_TEMPLATES = [
@@ -76,6 +90,7 @@ def create_db():
     migrate_task_table()
     migrate_activity_table()
     migrate_client_table()
+    migrate_contact_table()
     seed_master_data()
     seed_message_templates()
 
@@ -128,6 +143,24 @@ def migrate_client_table():
             if column not in existing:
                 connection.execute(text(f"ALTER TABLE clients ADD COLUMN {column} {definition}"))
         connection.execute(text("UPDATE clients SET category = 'Client' WHERE category IS NULL OR category = '' OR category = 'General'"))
+
+
+def migrate_contact_table():
+    with engine.begin() as connection:
+        existing = {
+            row[1]
+            for row in connection.execute(text("PRAGMA table_info(contacts)")).fetchall()
+        }
+        for column, definition in CONTACT_COLUMNS.items():
+            if column not in existing:
+                connection.execute(text(f"ALTER TABLE contacts ADD COLUMN {column} {definition}"))
+        connection.execute(text("UPDATE contacts SET phone = '' WHERE phone IS NULL"))
+        connection.execute(text("UPDATE contacts SET whatsapp = '' WHERE whatsapp IS NULL"))
+        connection.execute(text("UPDATE contacts SET email = '' WHERE email IS NULL"))
+        connection.execute(text("UPDATE contacts SET company = '' WHERE company IS NULL"))
+        connection.execute(text("UPDATE contacts SET address = '' WHERE address IS NULL"))
+        connection.execute(text("UPDATE contacts SET notes = '' WHERE notes IS NULL"))
+        connection.execute(text("UPDATE contacts SET active = 1 WHERE active IS NULL"))
 
 
 def seed_master_data():

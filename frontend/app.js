@@ -1,6 +1,7 @@
 const API_TASKS_URL = "/api/tasks";
 const API_MASTER_DATA_URL = "/api/master-data";
 const API_CLIENTS_URL = "/api/clients";
+const API_CONTACTS_URL = "/api/contacts";
 const API_MESSAGE_SCHEDULES_URL = "/api/client-message-schedules";
 const API_DUE_MESSAGES_URL = "/api/client-message-due";
 const API_MESSAGE_TEMPLATES_URL = "/api/message-templates";
@@ -13,6 +14,7 @@ const LOCAL_TIME_ZONE = "Asia/Kolkata";
 const state = {
   tasks: [],
   clients: [],
+  contacts: [],
   messageSchedules: [],
   dueMessages: [],
   messageTemplates: [],
@@ -54,6 +56,7 @@ const els = {
     board: document.querySelector("#boardView"),
     reports: document.querySelector("#reportsView"),
     clients: document.querySelector("#clientsView"),
+    contacts: document.querySelector("#contactsView"),
     settings: document.querySelector("#settingsView"),
   },
   navItems: document.querySelectorAll(".nav-item"),
@@ -78,6 +81,10 @@ const els = {
   clientForm: document.querySelector("#clientForm"),
   clientDialogTitle: document.querySelector("#clientDialogTitle"),
   deleteClientBtn: document.querySelector("#deleteClientBtn"),
+  contactDialog: document.querySelector("#contactDialog"),
+  contactForm: document.querySelector("#contactForm"),
+  contactDialogTitle: document.querySelector("#contactDialogTitle"),
+  deleteContactBtn: document.querySelector("#deleteContactBtn"),
   scheduleDialog: document.querySelector("#scheduleDialog"),
   scheduleForm: document.querySelector("#scheduleForm"),
   scheduleDialogTitle: document.querySelector("#scheduleDialogTitle"),
@@ -108,10 +115,21 @@ const els = {
     category: document.querySelector("#clientCategory"),
     phone: document.querySelector("#clientPhone"),
     whatsapp: document.querySelector("#clientWhatsapp"),
+    email: document.querySelector("#clientEmail"),
     address: document.querySelector("#clientAddress"),
     gst_no: document.querySelector("#clientGst"),
     work_scope: document.querySelector("#clientWorkScope"),
     birth_date: document.querySelector("#clientBirthDate"),
+  },
+  contactFields: {
+    id: document.querySelector("#contactId"),
+    name: document.querySelector("#contactName"),
+    phone: document.querySelector("#contactPhone"),
+    whatsapp: document.querySelector("#contactWhatsapp"),
+    email: document.querySelector("#contactEmail"),
+    company: document.querySelector("#contactCompany"),
+    address: document.querySelector("#contactAddress"),
+    notes: document.querySelector("#contactNotes"),
   },
   scheduleFields: {
     id: document.querySelector("#scheduleId"),
@@ -244,6 +262,7 @@ function closeDialogFromButton(button) {
   const pairs = new Map([
     [els.dialog, els.form],
     [els.clientDialog, els.clientForm],
+    [els.contactDialog, els.contactForm],
     [els.scheduleDialog, els.scheduleForm],
     [els.masterDialog, els.masterForm],
   ]);
@@ -325,6 +344,11 @@ async function loadClients() {
   state.clients = Array.isArray(clients) ? sortedItems(clients) : [];
 }
 
+async function loadContacts() {
+  const contacts = await api(API_CONTACTS_URL);
+  state.contacts = Array.isArray(contacts) ? sortedItems(contacts) : [];
+}
+
 async function loadMessageSchedules() {
   const schedules = await api(API_MESSAGE_SCHEDULES_URL);
   state.messageSchedules = Array.isArray(schedules) ? schedules : [];
@@ -386,6 +410,15 @@ function normalizePhoneInput(field) {
 
 function isTenDigitPhone(value) {
   return /^\d{10}$/.test(value);
+}
+
+function emailValue(value = "") {
+  return String(value).trim().toLowerCase();
+}
+
+function isValidEmail(value = "") {
+  const email = emailValue(value);
+  return !email || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email);
 }
 
 function gstNumber(value = "") {
@@ -1076,7 +1109,7 @@ function renderClients() {
                 <div class="task-row">
                   <div>
                     <button class="task-title" data-action="edit-client" data-id="${client.id}">${escapeHtml(client.name)}</button>
-                    <div class="task-meta">${escapeHtml(client.category || "Client")} - ${escapeHtml(client.phone || "No phone")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
+                    <div class="task-meta">${escapeHtml(client.category || "Client")} - ${escapeHtml(client.phone || "No phone")} - ${escapeHtml(client.email || "No email")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
                     ${client.birth_date ? `<div class="task-meta">Birth date: ${formatDate(client.birth_date)}</div>` : ""}
                   </div>
                 </div>
@@ -1105,6 +1138,131 @@ function renderClients() {
       </div>
     </div>
   `;
+}
+
+function renderContacts() {
+  els.views.contacts.innerHTML = `
+    <div class="panel">
+      <div class="panel-head">
+        <h3>Contacts / telephone diary</h3>
+        <div class="inline-actions">
+          <button class="secondary-button" data-action="import-contacts">Import</button>
+          <button class="secondary-button" data-action="export-contacts">Export</button>
+          <button class="primary-button" data-action="add-contact">Add contact</button>
+        </div>
+      </div>
+      <div class="task-note">Import supports CSV and iPhone vCard (.vcf) exports. Automatic iPhone contact sync needs a native app/iCloud integration later; browsers do not provide silent contact sync.</div>
+      <div class="client-grid">
+        ${state.contacts
+          .map(
+            (contact) => `
+              <article class="client-card">
+                <div class="task-row">
+                  <div>
+                    <button class="task-title" data-action="edit-contact" data-id="${contact.id}">${escapeHtml(contact.name)}</button>
+                    <div class="task-meta">${escapeHtml(contact.phone || "No phone")} - ${escapeHtml(contact.email || "No email")}</div>
+                    ${contact.company ? `<div class="task-meta">${escapeHtml(contact.company)}</div>` : ""}
+                  </div>
+                </div>
+                ${contact.address ? `<div class="task-note">${escapeHtml(contact.address)}</div>` : ""}
+                ${contact.notes ? `<div class="task-note">${escapeHtml(contact.notes)}</div>` : ""}
+                <div class="inline-actions">
+                  <button class="secondary-button link-button" data-action="contact-whatsapp" data-id="${contact.id}" type="button">WhatsApp</button>
+                  <button class="secondary-button link-button" data-action="contact-sms" data-id="${contact.id}" type="button">SMS</button>
+                  <button class="secondary-button" data-action="contact-to-client" data-id="${contact.id}" type="button">Make client</button>
+                </div>
+              </article>
+            `
+          )
+          .join("") || renderTaskList([], "No contacts saved yet")}
+      </div>
+    </div>
+  `;
+}
+
+function contactPayload() {
+  return {
+    name: els.contactFields.name.value.trim(),
+    phone: phoneDigits(els.contactFields.phone.value),
+    whatsapp: phoneDigits(els.contactFields.whatsapp.value),
+    email: emailValue(els.contactFields.email.value),
+    company: els.contactFields.company.value.trim(),
+    address: els.contactFields.address.value.trim(),
+    notes: els.contactFields.notes.value.trim(),
+    active: true,
+  };
+}
+
+function validateContactPayload(payload) {
+  if (!payload.name) return "Contact name is required.";
+  if (payload.phone && !isTenDigitPhone(payload.phone)) return "Mobile must be exactly 10 digits.";
+  if (payload.whatsapp && !isTenDigitPhone(payload.whatsapp)) return "WhatsApp must be exactly 10 digits.";
+  if (!isValidEmail(payload.email)) return "Email must be valid.";
+  if (!payload.phone && !payload.whatsapp && !payload.email) return "Add at least one phone, WhatsApp, or email.";
+  return "";
+}
+
+function openContactDialog(contact = null) {
+  els.contactForm.reset();
+  els.deleteContactBtn.hidden = !contact;
+  els.contactDialogTitle.textContent = contact ? "Edit contact" : "Add contact";
+  const defaults = { id: "", name: "", phone: "", whatsapp: "", email: "", company: "", address: "", notes: "" };
+  const data = { ...defaults, ...(contact || {}) };
+  Object.entries(els.contactFields).forEach(([key, field]) => {
+    field.value = data[key] ?? "";
+  });
+  els.contactDialog.showModal();
+  markDialogClean(els.contactDialog, els.contactForm);
+}
+
+async function saveContactForm(event) {
+  event.preventDefault();
+  const payload = contactPayload();
+  const error = validateContactPayload(payload);
+  if (error) {
+    window.alert(error);
+    return;
+  }
+  const id = els.contactFields.id.value;
+  if (!window.confirm(`${id ? "Edit" : "Add"} contact "${payload.name}"?`)) return;
+  try {
+    await api(id ? `${API_CONTACTS_URL}/${id}` : API_CONTACTS_URL, {
+      method: id ? "PUT" : "POST",
+      body: JSON.stringify(payload),
+    });
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
+  await loadContacts();
+  await loadActivity();
+  closeDialog(els.contactDialog, els.contactForm, { skipConfirm: true });
+  render();
+}
+
+async function deleteContactFromDialog() {
+  const id = els.contactFields.id.value;
+  if (!id || !window.confirm("Delete this contact?")) return;
+  await api(`${API_CONTACTS_URL}/${id}`, { method: "DELETE" });
+  await loadContacts();
+  await loadActivity();
+  closeDialog(els.contactDialog, els.contactForm, { skipConfirm: true });
+  render();
+}
+
+async function makeClientFromContact(contactId) {
+  const contact = state.contacts.find((item) => String(item.id) === String(contactId));
+  if (!contact || !window.confirm(`Create client "${contact.name}" from this contact?`)) return;
+  try {
+    await api(`${API_CONTACTS_URL}/${contactId}/make-client`, { method: "POST" });
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
+  await loadClients();
+  await loadActivity();
+  populateMasterControls();
+  render();
 }
 
 function masterList(title, type, items) {
@@ -1285,6 +1443,7 @@ function render() {
   renderBoard();
   renderReports();
   renderClients();
+  renderContacts();
   renderSettings();
   checkNotificationHints();
 }
@@ -1394,6 +1553,7 @@ function openClientDialog(client = null) {
     category: state.master.categories[0] || "Client",
     phone: "",
     whatsapp: "",
+    email: "",
     address: "",
     gst_no: "",
     work_scope: "",
@@ -1413,6 +1573,7 @@ function readClientForm() {
     category: els.clientFields.category.value || "Client",
     phone: phoneDigits(els.clientFields.phone.value),
     whatsapp: phoneDigits(els.clientFields.whatsapp.value),
+    email: emailValue(els.clientFields.email.value),
     address: els.clientFields.address.value.trim(),
     gst_no: gstNumber(els.clientFields.gst_no.value),
     work_scope: els.clientFields.work_scope.value.trim(),
@@ -1433,6 +1594,11 @@ async function saveClientForm(event) {
   if (payload.whatsapp && !isTenDigitPhone(payload.whatsapp)) {
     window.alert("WhatsApp must be exactly 10 digits.");
     els.clientFields.whatsapp.focus();
+    return;
+  }
+  if (!isValidEmail(payload.email)) {
+    window.alert("Email must be valid.");
+    els.clientFields.email.focus();
     return;
   }
   if (!isValidGstNumber(payload.gst_no)) {
@@ -1841,6 +2007,116 @@ function checkNotificationHints() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, lastNotificationDate: todayISO() }));
 }
 
+function csvCell(value) {
+  return `"${String(value ?? "").replace(/"/g, '""')}"`;
+}
+
+function downloadTextFile(filename, text, type = "text/plain;charset=utf-8") {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function splitCsvLine(line) {
+  const cells = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"' && line[index + 1] === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      cells.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  cells.push(current);
+  return cells;
+}
+
+function parseCsvContacts(text) {
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (lines.length < 2) return [];
+  const headers = splitCsvLine(lines[0]).map((header) => header.trim().toLowerCase());
+  return lines.slice(1).map((line) => {
+    const values = splitCsvLine(line);
+    const row = Object.fromEntries(headers.map((header, index) => [header, values[index] || ""]));
+    return {
+      name: row.name || row["full name"] || row.contact || "",
+      phone: row.phone || row.mobile || row.telephone || "",
+      whatsapp: row.whatsapp || "",
+      email: row.email || row.mail || "",
+      company: row.company || row.organization || "",
+      address: row.address || "",
+      notes: row.notes || row.note || "",
+    };
+  });
+}
+
+function parseVcfContacts(text) {
+  return text
+    .split(/BEGIN:VCARD/i)
+    .slice(1)
+    .map((card) => {
+      const lines = card.split(/\r?\n/);
+      const valueFor = (prefixes) => {
+        const line = lines.find((item) => prefixes.some((prefix) => item.toUpperCase().startsWith(prefix)));
+        return line ? line.slice(line.indexOf(":") + 1).replace(/\\n/g, " ").trim() : "";
+      };
+      const name = valueFor(["FN"]) || valueFor(["N"]);
+      const phone = phoneDigits(valueFor(["TEL"]));
+      const email = valueFor(["EMAIL"]).toLowerCase();
+      const company = valueFor(["ORG"]);
+      const address = valueFor(["ADR"]).replace(/;/g, " ").replace(/\s+/g, " ").trim();
+      const notes = valueFor(["NOTE"]);
+      return { name, phone, whatsapp: "", email, company, address, notes };
+    })
+    .filter((contact) => contact.name);
+}
+
+function exportContactsCSV() {
+  const headers = ["Name", "Phone", "WhatsApp", "Email", "Company", "Address", "Notes"];
+  const rows = state.contacts.map((contact) =>
+    [contact.name, contact.phone, contact.whatsapp, contact.email, contact.company, contact.address, contact.notes].map(csvCell).join(",")
+  );
+  downloadTextFile(`gpa-v3-contacts-${todayISO()}.csv`, [headers.map(csvCell).join(","), ...rows].join("\n"), "text/csv;charset=utf-8");
+}
+
+function importContactsFromFile() {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".csv,.vcf,text/csv,text/vcard";
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const text = await file.text();
+    const contacts = file.name.toLowerCase().endsWith(".vcf") ? parseVcfContacts(text) : parseCsvContacts(text);
+    if (!contacts.length) {
+      window.alert("No contacts found in this file.");
+      return;
+    }
+    if (!window.confirm(`Import ${contacts.length} contact(s)? Existing names will be updated.`)) return;
+    const result = await api(`${API_CONTACTS_URL}/import`, {
+      method: "POST",
+      body: JSON.stringify({ contacts }),
+    });
+    await loadContacts();
+    await loadActivity();
+    render();
+    window.alert(`Imported contacts. Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}`);
+  });
+  input.click();
+}
+
 function exportCSV() {
   const headers = [
     "Row Type",
@@ -1856,6 +2132,7 @@ function exportCSV() {
     "Client Category",
     "Client Mobile",
     "Client WhatsApp",
+    "Client Email",
     "Client GST No.",
     "Client Birth Date",
     "Client Work Scope",
@@ -1879,7 +2156,6 @@ function exportCSV() {
     "Activity Details",
     "Activity Time",
   ];
-  const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
   const rows = state.tasks.map((task) => {
     const client = clientForTask(task);
     return [
@@ -1896,6 +2172,7 @@ function exportCSV() {
       client?.category,
       client?.phone,
       client?.whatsapp,
+      client?.email,
       client?.gst_no,
       client?.birth_date,
       client?.work_scope,
@@ -1949,6 +2226,7 @@ function exportCSV() {
       client?.category,
       client?.phone,
       client?.whatsapp,
+      client?.email,
       client?.gst_no,
       client?.birth_date,
       client?.work_scope,
@@ -1989,6 +2267,7 @@ function exportCSV() {
 function bindEvents() {
   bindDialogGuard(els.dialog, els.form);
   bindDialogGuard(els.clientDialog, els.clientForm);
+  bindDialogGuard(els.contactDialog, els.contactForm);
   bindDialogGuard(els.scheduleDialog, els.scheduleForm);
   bindDialogGuard(els.masterDialog, els.masterForm);
 
@@ -2030,7 +2309,11 @@ function bindEvents() {
   });
   els.form.addEventListener("submit", saveForm);
   els.clientForm.addEventListener("submit", saveClientForm);
+  els.contactForm.addEventListener("submit", saveContactForm);
   [els.clientFields.phone, els.clientFields.whatsapp].forEach((field) => {
+    field.addEventListener("input", () => normalizePhoneInput(field));
+  });
+  [els.contactFields.phone, els.contactFields.whatsapp].forEach((field) => {
     field.addEventListener("input", () => normalizePhoneInput(field));
   });
   els.clientFields.gst_no.addEventListener("input", () => normalizeGstInput(els.clientFields.gst_no));
@@ -2041,6 +2324,7 @@ function bindEvents() {
     if (task) deleteTask(task);
   });
   els.deleteClientBtn.addEventListener("click", deleteClientFromDialog);
+  els.deleteContactBtn.addEventListener("click", deleteContactFromDialog);
   els.deleteScheduleBtn.addEventListener("click", deleteScheduleFromDialog);
   els.deleteMasterBtn.addEventListener("click", deleteMasterFromDialog);
   document.body.addEventListener("click", (event) => {
@@ -2066,6 +2350,37 @@ function bindEvents() {
     }
     if (target.dataset.action === "client-message") {
       sendClientMessage(target.dataset.id, target.dataset.channel, target);
+      return;
+    }
+    if (target.dataset.action === "add-contact") {
+      openContactDialog();
+      return;
+    }
+    if (target.dataset.action === "edit-contact") {
+      const contact = state.contacts.find((item) => String(item.id) === String(target.dataset.id));
+      if (contact) openContactDialog(contact);
+      return;
+    }
+    if (target.dataset.action === "import-contacts") {
+      importContactsFromFile();
+      return;
+    }
+    if (target.dataset.action === "export-contacts") {
+      exportContactsCSV();
+      return;
+    }
+    if (target.dataset.action === "contact-whatsapp") {
+      const contact = state.contacts.find((item) => String(item.id) === String(target.dataset.id));
+      if (contact) openPreparedMessage("whatsapp", contact.whatsapp || contact.phone, `Hello ${contact.name}`);
+      return;
+    }
+    if (target.dataset.action === "contact-sms") {
+      const contact = state.contacts.find((item) => String(item.id) === String(target.dataset.id));
+      if (contact) openPreparedMessage("sms", contact.phone || contact.whatsapp, `Hello ${contact.name}`);
+      return;
+    }
+    if (target.dataset.action === "contact-to-client") {
+      makeClientFromContact(target.dataset.id);
       return;
     }
     if (target.dataset.action === "send-due-message") {
@@ -2136,6 +2451,7 @@ async function init() {
     await loadMasterData();
     await loadMessageTemplates();
     await loadClients();
+    await loadContacts();
     populateMasterControls();
     await loadTasks();
     await loadMessageSchedules();

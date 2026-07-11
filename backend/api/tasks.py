@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from backend.database.engine import get_session
 from backend.models.activity import ActivityLog
 from backend.models.client import Client
+from backend.models.contact import Contact
 from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
@@ -57,6 +58,7 @@ class ClientBase(BaseModel):
     category: str = "Client"
     phone: str = Field(min_length=1, max_length=40)
     whatsapp: str = ""
+    email: str = ""
     address: str = ""
     gst_no: str = ""
     work_scope: str = ""
@@ -75,6 +77,29 @@ class ClientCreate(ClientBase):
 
 class ClientUpdate(ClientBase):
     pass
+
+
+class ContactBase(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    phone: str = ""
+    whatsapp: str = ""
+    email: str = ""
+    company: str = ""
+    address: str = ""
+    notes: str = ""
+    active: bool = True
+
+
+class ContactCreate(ContactBase):
+    pass
+
+
+class ContactUpdate(ContactBase):
+    pass
+
+
+class ContactImport(BaseModel):
+    contacts: list[ContactCreate]
 
 
 class MessageScheduleBase(BaseModel):
@@ -369,6 +394,19 @@ def normalize_phone_number(value: str, label: str, required: bool = False) -> st
     return digits
 
 
+def normalize_optional_phone_number(value: str, label: str) -> str:
+    return normalize_phone_number(value, label) if value else ""
+
+
+def normalize_email(value: str) -> str:
+    email = (value or "").strip().lower()
+    if not email:
+        return ""
+    if not fullmatch(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=400, detail="Email must be valid")
+    return email
+
+
 def normalize_gst_no(value: str) -> str:
     gst_no = sub(r"[^A-Za-z0-9]", "", value or "").upper()
     if not gst_no:
@@ -391,7 +429,22 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Ses
     ensure_master_value(session, Category, data["category"], "category")
     data["phone"] = normalize_phone_number(data["phone"], "Mobile / SMS", required=True)
     data["whatsapp"] = normalize_phone_number(data["whatsapp"], "WhatsApp")
+    data["email"] = normalize_email(data["email"])
     data["gst_no"] = normalize_gst_no(data["gst_no"])
+    return data
+
+
+def normalize_contact_data(contact_data: ContactCreate | ContactUpdate) -> dict:
+    data = contact_data.model_dump()
+    for key, value in data.items():
+        if isinstance(value, str):
+            data[key] = value.strip()
+    data["name"] = " ".join(data["name"].split())
+    if not data["name"]:
+        raise HTTPException(status_code=400, detail="Contact name is required")
+    data["phone"] = normalize_optional_phone_number(data["phone"], "Mobile")
+    data["whatsapp"] = normalize_optional_phone_number(data["whatsapp"], "WhatsApp")
+    data["email"] = normalize_email(data["email"])
     return data
 
 
@@ -814,6 +867,119 @@ def delete_client(client_id: int, session: Session = Depends(get_session)):
     log_activity(session, "DELETED", "client", f"Deleted client: {client.name}", client.id)
     session.commit()
     return {"success": True, "message": "Client deleted"}
+
+
+@router.get("/contacts")
+def get_contacts(include_inactive: bool = False, session: Session = Depends(get_session)):
+    statement = select(Contact)
+    if not include_inactive:
+        statement = statement.where(Contact.active == True)  # noqa: E712
+    return session.exec(statement.order_by(Contact.name)).all()
+
+
+@router.post("/contacts")
+def create_contact(contact_data: ContactCreate, session: Session = Depends(get_session)):
+    data = normalize_contact_data(contact_data)
+    existing = find_duplicate_by_name(session, Contact, data["name"])
+    if existing:
+        raise HTTPException(status_code=400, detail="Contact name already exists")
+    contact = Contact(**data, updated_at=now())
+    session.add(contact)
+    session.flush()
+    log_activity(session, "CREATED", "contact", f"Added contact: {contact.name}", contact.id)
+    session.commit()
+    session.refresh(contact)
+    return contact
+
+
+@router.put("/contacts/{contact_id}")
+def update_contact(contact_id: int, contact_data: ContactUpdate, session: Session = Depends(get_session)):
+    contact = session.get(Contact, contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    data = normalize_contact_data(contact_data)
+    duplicate = find_duplicate_by_name(session, Contact, data["name"], exclude_id=contact_id)
+    if duplicate:
+        raise HTTPException(status_code=400, detail="Contact name already exists")
+    for field, value in data.items():
+        setattr(contact, field, value)
+    contact.updated_at = now()
+    session.add(contact)
+    log_activity(session, "UPDATED", "contact", f"Updated contact: {contact.name}", contact.id)
+    session.commit()
+    session.refresh(contact)
+    return contact
+
+
+@router.delete("/contacts/{contact_id}")
+def delete_contact(contact_id: int, session: Session = Depends(get_session)):
+    contact = session.get(Contact, contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    contact.active = False
+    contact.updated_at = now()
+    session.add(contact)
+    log_activity(session, "DELETED", "contact", f"Deleted contact: {contact.name}", contact.id)
+    session.commit()
+    return {"success": True, "message": "Contact deleted"}
+
+
+@router.post("/contacts/import")
+def import_contacts(import_data: ContactImport, session: Session = Depends(get_session)):
+    created = 0
+    updated = 0
+    skipped = 0
+    for contact_data in import_data.contacts:
+        data = normalize_contact_data(contact_data)
+        existing = find_duplicate_by_name(session, Contact, data["name"])
+        if existing:
+            for field, value in data.items():
+                if field == "name":
+                    continue
+                if value:
+                    setattr(existing, field, value)
+            existing.active = True
+            existing.updated_at = now()
+            session.add(existing)
+            updated += 1
+            continue
+        if not data["phone"] and not data["whatsapp"] and not data["email"]:
+            skipped += 1
+            continue
+        session.add(Contact(**data, updated_at=now()))
+        created += 1
+    log_activity(session, "IMPORTED", "contact", f"Imported contacts: {created} created, {updated} updated, {skipped} skipped")
+    session.commit()
+    return {"success": True, "created": created, "updated": updated, "skipped": skipped}
+
+
+@router.post("/contacts/{contact_id}/make-client")
+def make_client_from_contact(contact_id: int, session: Session = Depends(get_session)):
+    contact = session.get(Contact, contact_id)
+    if not contact:
+        raise HTTPException(status_code=404, detail="Contact not found")
+    existing = find_duplicate_by_name(session, Client, contact.name)
+    if existing:
+        raise HTTPException(status_code=400, detail="Client name already exists")
+    client = Client(
+        name=contact.name,
+        category="Client",
+        phone=contact.phone or contact.whatsapp,
+        whatsapp=contact.whatsapp,
+        email=contact.email,
+        address=contact.address,
+        work_scope=contact.company,
+        notes=contact.notes,
+        updated_at=now(),
+    )
+    if not client.phone:
+        raise HTTPException(status_code=400, detail="Contact must have a phone or WhatsApp number before creating client")
+    session.add(client)
+    session.flush()
+    log_activity(session, "CREATED", "client", f"Created client from contact: {client.name}", client.id)
+    session.commit()
+    session.refresh(client)
+    return client
 
 
 @router.get("/client-message-schedules")
