@@ -346,6 +346,32 @@ def find_duplicate_by_name(session: Session, model, name: str, exclude_id: int |
     return None
 
 
+def find_duplicate_by_any_field(session: Session, model, fields: list[str], value: str, exclude_id: int | None = None):
+    if not value:
+        return None
+    for item in session.exec(select(model)).all():
+        if exclude_id is not None and item.id == exclude_id:
+            continue
+        if any(getattr(item, field, "") == value for field in fields):
+            return item
+    return None
+
+
+def ensure_unique_people_fields(session: Session, model, data: dict, label: str, exclude_id: int | None = None):
+    duplicate = find_duplicate_by_name(session, model, data["name"], exclude_id=exclude_id)
+    if duplicate:
+        raise HTTPException(status_code=400, detail=f"{label} name already exists: {duplicate.name}")
+    checks = [
+        (["phone", "whatsapp"], "Mobile", data.get("phone", "")),
+        (["phone", "whatsapp"], "WhatsApp", data.get("whatsapp", "")),
+        (["email"], "Email", data.get("email", "")),
+    ]
+    for fields, field_label, value in checks:
+        duplicate = find_duplicate_by_any_field(session, model, fields, value, exclude_id=exclude_id)
+        if duplicate:
+            raise HTTPException(status_code=400, detail=f"{field_label} already exists in {label.lower()}: {duplicate.name}")
+
+
 def master_usage_counts(session: Session, master_type: str, name: str) -> list[tuple[str, int]]:
     counts = []
     for model, field in MASTER_USAGE.get(master_type, []):
@@ -820,9 +846,7 @@ def get_clients(include_inactive: bool = False, session: Session = Depends(get_s
 @router.post("/clients")
 def create_client(client_data: ClientCreate, session: Session = Depends(get_session)):
     data = normalize_client_data(client_data, session)
-    existing = find_duplicate_by_name(session, Client, data["name"])
-    if existing:
-        raise HTTPException(status_code=400, detail="Client name already exists")
+    ensure_unique_people_fields(session, Client, data, "Client")
     client = Client(**data, updated_at=now())
     session.add(client)
     session.flush()
@@ -839,6 +863,13 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
         raise HTTPException(status_code=404, detail="Client not found")
     contact = find_duplicate_by_name(session, Contact, client.name)
     if contact:
+        data = {
+            "name": client.name,
+            "phone": client.phone,
+            "whatsapp": client.whatsapp,
+            "email": client.email,
+        }
+        ensure_unique_people_fields(session, Contact, data, "Contact", exclude_id=contact.id)
         contact.phone = client.phone
         contact.whatsapp = client.whatsapp
         contact.email = client.email
@@ -850,6 +881,13 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
         session.add(contact)
         log_activity(session, "UPDATED", "contact", f"Updated contact from client: {contact.name}", contact.id)
     else:
+        data = {
+            "name": client.name,
+            "phone": client.phone,
+            "whatsapp": client.whatsapp,
+            "email": client.email,
+        }
+        ensure_unique_people_fields(session, Contact, data, "Contact")
         contact = Contact(
             name=client.name,
             phone=client.phone,
@@ -874,9 +912,7 @@ def update_client(client_id: int, client_data: ClientUpdate, session: Session = 
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     data = normalize_client_data(client_data, session)
-    duplicate = find_duplicate_by_name(session, Client, data["name"], exclude_id=client_id)
-    if duplicate:
-        raise HTTPException(status_code=400, detail="Client name already exists")
+    ensure_unique_people_fields(session, Client, data, "Client", exclude_id=client_id)
     for field, value in data.items():
         setattr(client, field, value)
     client.updated_at = now()
@@ -916,9 +952,7 @@ def get_contacts(include_inactive: bool = False, session: Session = Depends(get_
 @router.post("/contacts")
 def create_contact(contact_data: ContactCreate, session: Session = Depends(get_session)):
     data = normalize_contact_data(contact_data)
-    existing = find_duplicate_by_name(session, Contact, data["name"])
-    if existing:
-        raise HTTPException(status_code=400, detail="Contact name already exists")
+    ensure_unique_people_fields(session, Contact, data, "Contact")
     contact = Contact(**data, updated_at=now())
     session.add(contact)
     session.flush()
@@ -934,9 +968,7 @@ def update_contact(contact_id: int, contact_data: ContactUpdate, session: Sessio
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
     data = normalize_contact_data(contact_data)
-    duplicate = find_duplicate_by_name(session, Contact, data["name"], exclude_id=contact_id)
-    if duplicate:
-        raise HTTPException(status_code=400, detail="Contact name already exists")
+    ensure_unique_people_fields(session, Contact, data, "Contact", exclude_id=contact_id)
     for field, value in data.items():
         setattr(contact, field, value)
     contact.updated_at = now()
@@ -969,6 +1001,7 @@ def import_contacts(import_data: ContactImport, session: Session = Depends(get_s
         data = normalize_contact_data(contact_data)
         existing = find_duplicate_by_name(session, Contact, data["name"])
         if existing:
+            ensure_unique_people_fields(session, Contact, data, "Contact", exclude_id=existing.id)
             for field, value in data.items():
                 if field == "name":
                     continue
@@ -982,6 +1015,7 @@ def import_contacts(import_data: ContactImport, session: Session = Depends(get_s
         if not data["phone"] and not data["whatsapp"] and not data["email"]:
             skipped += 1
             continue
+        ensure_unique_people_fields(session, Contact, data, "Contact")
         session.add(Contact(**data, updated_at=now()))
         created += 1
     log_activity(session, "IMPORTED", "contact", f"Imported contacts: {created} created, {updated} updated, {skipped} skipped")
@@ -998,6 +1032,13 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         raise HTTPException(status_code=400, detail="Contact must have a phone or WhatsApp number before creating client")
     client = find_duplicate_by_name(session, Client, contact.name)
     if client:
+        data = {
+            "name": contact.name,
+            "phone": contact.phone or contact.whatsapp,
+            "whatsapp": contact.whatsapp,
+            "email": contact.email,
+        }
+        ensure_unique_people_fields(session, Client, data, "Client", exclude_id=client.id)
         client.phone = contact.phone or contact.whatsapp
         client.whatsapp = contact.whatsapp
         client.email = contact.email
@@ -1009,6 +1050,13 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         session.add(client)
         log_activity(session, "UPDATED", "client", f"Updated client from contact: {client.name}", client.id)
     else:
+        data = {
+            "name": contact.name,
+            "phone": contact.phone or contact.whatsapp,
+            "whatsapp": contact.whatsapp,
+            "email": contact.email,
+        }
+        ensure_unique_people_fields(session, Client, data, "Client")
         client = Client(
             name=contact.name,
             category="Client",
