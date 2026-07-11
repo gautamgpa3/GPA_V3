@@ -832,6 +832,42 @@ def create_client(client_data: ClientCreate, session: Session = Depends(get_sess
     return client
 
 
+@router.post("/clients/{client_id}/make-contact")
+def make_contact_from_client(client_id: int, session: Session = Depends(get_session)):
+    client = session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+    contact = find_duplicate_by_name(session, Contact, client.name)
+    if contact:
+        contact.phone = client.phone
+        contact.whatsapp = client.whatsapp
+        contact.email = client.email
+        contact.company = client.work_scope
+        contact.address = client.address
+        contact.notes = client.notes
+        contact.active = True
+        contact.updated_at = now()
+        session.add(contact)
+        log_activity(session, "UPDATED", "contact", f"Updated contact from client: {contact.name}", contact.id)
+    else:
+        contact = Contact(
+            name=client.name,
+            phone=client.phone,
+            whatsapp=client.whatsapp,
+            email=client.email,
+            company=client.work_scope,
+            address=client.address,
+            notes=client.notes,
+            updated_at=now(),
+        )
+        session.add(contact)
+        session.flush()
+        log_activity(session, "CREATED", "contact", f"Created contact from client: {contact.name}", contact.id)
+    session.commit()
+    session.refresh(contact)
+    return contact
+
+
 @router.put("/clients/{client_id}")
 def update_client(client_id: int, client_data: ClientUpdate, session: Session = Depends(get_session)):
     client = session.get(Client, client_id)
@@ -958,25 +994,35 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
     contact = session.get(Contact, contact_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
-    existing = find_duplicate_by_name(session, Client, contact.name)
-    if existing:
-        raise HTTPException(status_code=400, detail="Client name already exists")
-    client = Client(
-        name=contact.name,
-        category="Client",
-        phone=contact.phone or contact.whatsapp,
-        whatsapp=contact.whatsapp,
-        email=contact.email,
-        address=contact.address,
-        work_scope=contact.company,
-        notes=contact.notes,
-        updated_at=now(),
-    )
-    if not client.phone:
+    if not contact.phone and not contact.whatsapp:
         raise HTTPException(status_code=400, detail="Contact must have a phone or WhatsApp number before creating client")
-    session.add(client)
-    session.flush()
-    log_activity(session, "CREATED", "client", f"Created client from contact: {client.name}", client.id)
+    client = find_duplicate_by_name(session, Client, contact.name)
+    if client:
+        client.phone = contact.phone or contact.whatsapp
+        client.whatsapp = contact.whatsapp
+        client.email = contact.email
+        client.address = contact.address
+        client.work_scope = contact.company
+        client.notes = contact.notes
+        client.active = True
+        client.updated_at = now()
+        session.add(client)
+        log_activity(session, "UPDATED", "client", f"Updated client from contact: {client.name}", client.id)
+    else:
+        client = Client(
+            name=contact.name,
+            category="Client",
+            phone=contact.phone or contact.whatsapp,
+            whatsapp=contact.whatsapp,
+            email=contact.email,
+            address=contact.address,
+            work_scope=contact.company,
+            notes=contact.notes,
+            updated_at=now(),
+        )
+        session.add(client)
+        session.flush()
+        log_activity(session, "CREATED", "client", f"Created client from contact: {client.name}", client.id)
     session.commit()
     session.refresh(client)
     return client

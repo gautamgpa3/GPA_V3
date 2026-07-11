@@ -630,6 +630,19 @@ function renderTaskList(tasks, emptyText = "No matching work") {
   return `<div class="task-list">${tasks.map(taskCard).join("")}</div>`;
 }
 
+function renderDashboardTaskPreview(tasks, emptyText, metric, limit = 5) {
+  const visibleTasks = tasks.slice(0, limit);
+  const moreCount = tasks.length - visibleTasks.length;
+  return `
+    ${renderTaskList(visibleTasks, emptyText)}
+    ${
+      moreCount > 0
+        ? `<button class="secondary-button link-button" data-action="metric-details" data-metric="${metric}" type="button">More ${moreCount}</button>`
+        : ""
+    }
+  `;
+}
+
 function getStats() {
   const open = openTasks();
   const pending = pendingTasks();
@@ -649,12 +662,15 @@ function getStats() {
 function dashboardMetricTasks(metric) {
   const open = openTasks();
   const pending = pendingTasks();
+  const today = todaysPendingTasks();
   const groups = {
-    today: ["Today's pending", todaysPendingTasks()],
+    today: ["Today's pending", today],
     dueToday: ["Due today", open.filter((task) => diffDays(task.due_date) === 0)],
     overdue: ["Overdue", overdueTasks()],
     active: ["Pending work", pending],
+    next7: ["Next 7 days", pending.filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !today.includes(task))],
     blocked: ["Blocked / issue", open.filter((task) => task.status === "Blocked" || task.issue)],
+    recurring: ["Recurring work", open.filter((task) => task.repeat_type && task.repeat_type !== "None")],
   };
   return groups[metric] || ["Tasks", []];
 }
@@ -716,27 +732,27 @@ function renderDashboard() {
     <div class="content-grid">
       <div class="panel">
         <div class="panel-head"><h3>Today's pending work</h3><span class="mini">${today.length} starting or due today</span></div>
-        ${renderTaskList(today, "No pending work for today")}
+        ${renderDashboardTaskPreview(today, "No pending work for today", "today")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Overdue work</h3><span class="mini">${overdue.length} overdue</span></div>
-        ${renderTaskList(overdue, "No overdue work")}
+        ${renderDashboardTaskPreview(overdue, "No overdue work", "overdue")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>All pending work</h3><span class="mini">${pending.length} pending</span></div>
-        ${renderTaskList(pending, "No pending work")}
+        ${renderDashboardTaskPreview(pending, "No pending work", "active")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Next 7 days</h3><span class="mini">${soon.length} upcoming</span></div>
-        ${renderTaskList(soon, "No upcoming work this week")}
+        ${renderDashboardTaskPreview(soon, "No upcoming work this week", "next7")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Issues and blockers</h3><span class="mini">${blocked.length} needs attention</span></div>
-        ${renderTaskList(blocked, "No issue notes recorded")}
+        ${renderDashboardTaskPreview(blocked, "No issue notes recorded", "blocked")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Recurring work</h3><span class="mini">${stats.recurring} scheduled</span></div>
-        ${renderTaskList(open.filter((task) => task.repeat_type && task.repeat_type !== "None").slice(0, 8), "No recurring work yet")}
+        ${renderDashboardTaskPreview(open.filter((task) => task.repeat_type && task.repeat_type !== "None"), "No recurring work yet", "recurring")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>AI suggestions</h3><span class="mini">From your data</span></div>
@@ -1225,17 +1241,23 @@ async function saveContactForm(event) {
   }
   const id = els.contactFields.id.value;
   if (!window.confirm(`${id ? "Edit" : "Add"} contact "${payload.name}"?`)) return;
+  let savedContact;
   try {
-    await api(id ? `${API_CONTACTS_URL}/${id}` : API_CONTACTS_URL, {
+    savedContact = await api(id ? `${API_CONTACTS_URL}/${id}` : API_CONTACTS_URL, {
       method: id ? "PUT" : "POST",
       body: JSON.stringify(payload),
     });
+    if (savedContact?.id && (savedContact.phone || savedContact.whatsapp) && window.confirm(`Also save "${savedContact.name}" in clients?`)) {
+      await api(`${API_CONTACTS_URL}/${savedContact.id}/make-client`, { method: "POST" });
+    }
   } catch (error) {
     window.alert(error.message);
     return;
   }
   await loadContacts();
+  await loadClients();
   await loadActivity();
+  populateMasterControls();
   closeDialog(els.contactDialog, els.contactForm, { skipConfirm: true });
   render();
 }
@@ -1260,6 +1282,7 @@ async function makeClientFromContact(contactId) {
     return;
   }
   await loadClients();
+  await loadContacts();
   await loadActivity();
   populateMasterControls();
   render();
@@ -1614,6 +1637,9 @@ async function saveClientForm(event) {
       method: id ? "PUT" : "POST",
       body: JSON.stringify(payload),
     });
+    if (savedClient?.id && window.confirm(`Also save "${savedClient.name}" in contacts?`)) {
+      await api(`${API_CLIENTS_URL}/${savedClient.id}/make-contact`, { method: "POST" });
+    }
   } catch (error) {
     window.alert(error.message);
     return;
@@ -1623,6 +1649,7 @@ async function saveClientForm(event) {
     state.resumeTaskDraft.category = savedClient.category || "Client";
   }
   await loadClients();
+  await loadContacts();
   await loadDueMessages();
   await loadActivity();
   populateMasterControls();
