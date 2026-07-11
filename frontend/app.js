@@ -666,8 +666,9 @@ function renderDashboard() {
   const stats = getStats();
   const open = openTasks();
   const today = todaysPendingTasks();
+  const pending = pendingTasks();
   const overdue = overdueTasks();
-  const soon = pendingTasks().filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !today.includes(task));
+  const soon = pending.filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !today.includes(task));
   const blocked = open.filter((task) => task.status === "Blocked" || task.issue);
 
   els.views.dashboard.innerHTML = `
@@ -687,6 +688,10 @@ function renderDashboard() {
       <div class="panel">
         <div class="panel-head"><h3>Overdue work</h3><span class="mini">${overdue.length} overdue</span></div>
         ${renderTaskList(overdue, "No overdue work")}
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>All pending work</h3><span class="mini">${pending.length} pending</span></div>
+        ${renderTaskList(pending, "No pending work")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>Next 7 days</h3><span class="mini">${soon.length} upcoming</span></div>
