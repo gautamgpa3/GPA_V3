@@ -11,7 +11,31 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <main class="login-shell" id="loginShell" hidden>
+      <section class="login-card">
+        <div class="brand">
+          <div class="brand-mark">GP</div>
+          <div>
+            <h1>Gautam's PA</h1>
+            <p>Secure login</p>
+          </div>
+        </div>
+        <form class="login-form" id="loginForm">
+          <label>
+            <span>Username</span>
+            <input id="loginUsername" autocomplete="username" required />
+          </label>
+          <label>
+            <span>Password</span>
+            <input id="loginPassword" type="password" autocomplete="current-password" required />
+          </label>
+          <p class="task-meta" id="loginError"></p>
+          <button class="primary-button" type="submit">Login</button>
+        </form>
+      </section>
+    </main>
+
+    <div class="app-shell" id="appShell" hidden>
       <aside class="sidebar">
         <div class="brand">
           <div class="brand-mark">GP</div>
@@ -73,6 +97,7 @@
             <button class="primary-button" id="quickAddBtn">
               <span aria-hidden="true">+</span><span>Add work</span>
             </button>
+            <button class="secondary-button" id="logoutBtn" type="button">Logout</button>
           </div>
         </header>
 

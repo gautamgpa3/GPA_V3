@@ -8,6 +8,9 @@ const API_MESSAGE_TEMPLATES_URL = "/api/message-templates";
 const API_ACTIVITY_URL = "/api/activity";
 const API_ASSISTANT_URL = "/api/assistant/command";
 const API_BRIEFING_URL = "/api/briefing";
+const API_AUTH_STATUS_URL = "/api/auth/status";
+const API_AUTH_LOGIN_URL = "/api/auth/login";
+const API_AUTH_LOGOUT_URL = "/api/auth/logout";
 const SETTINGS_KEY = "gpa-v3-settings";
 const LOCAL_TIME_ZONE = "Asia/Kolkata";
 
@@ -47,6 +50,12 @@ const state = {
 const dialogSnapshots = new WeakMap();
 
 const els = {
+  loginShell: document.querySelector("#loginShell"),
+  appShell: document.querySelector("#appShell"),
+  loginForm: document.querySelector("#loginForm"),
+  loginUsername: document.querySelector("#loginUsername"),
+  loginPassword: document.querySelector("#loginPassword"),
+  loginError: document.querySelector("#loginError"),
   todayLabel: document.querySelector("#todayLabel"),
   viewTitle: document.querySelector("#viewTitle"),
   views: {
@@ -67,6 +76,7 @@ const els = {
   searchInput: document.querySelector("#searchInput"),
   notificationBtn: document.querySelector("#notificationBtn"),
   exportBtn: document.querySelector("#exportBtn"),
+  logoutBtn: document.querySelector("#logoutBtn"),
   quickAddClientBtn: document.querySelector("#quickAddClientBtn"),
   quickAddClientCategoryBtn: document.querySelector("#quickAddClientCategoryBtn"),
   quickAddPriorityBtn: document.querySelector("#quickAddPriorityBtn"),
@@ -313,10 +323,14 @@ function normalizeTask(task) {
 async function api(path, options = {}) {
   const response = await fetch(path, {
     cache: "no-store",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
   });
   if (!response.ok) {
+    if (response.status === 401) {
+      showLogin();
+    }
     const detail = await response.text();
     let message = detail;
     try {
@@ -327,6 +341,57 @@ async function api(path, options = {}) {
     throw new Error(message || `Request failed: ${response.status}`);
   }
   return response.status === 204 ? null : response.json();
+}
+
+function showLogin(message = "") {
+  els.appShell.hidden = true;
+  els.loginShell.hidden = false;
+  els.loginError.textContent = message;
+  window.setTimeout(() => els.loginUsername.focus(), 0);
+}
+
+function showApp() {
+  els.loginShell.hidden = true;
+  els.appShell.hidden = false;
+  els.loginError.textContent = "";
+}
+
+async function authStatus() {
+  try {
+    const response = await api(API_AUTH_STATUS_URL);
+    return Boolean(response.authenticated);
+  } catch {
+    return false;
+  }
+}
+
+async function login(event) {
+  event.preventDefault();
+  els.loginError.textContent = "";
+  try {
+    await api(API_AUTH_LOGIN_URL, {
+      method: "POST",
+      body: JSON.stringify({
+        username: els.loginUsername.value.trim(),
+        password: els.loginPassword.value,
+      }),
+    });
+  } catch (error) {
+    showLogin(error.message || "Invalid username or password");
+    return;
+  }
+  els.loginPassword.value = "";
+  await startApp();
+}
+
+async function logout() {
+  await api(API_AUTH_LOGOUT_URL, { method: "POST" });
+  window.location.reload();
+}
+
+function bindAuthEvents() {
+  els.loginForm.addEventListener("submit", login);
+  els.logoutBtn.addEventListener("click", logout);
 }
 
 async function loadMasterData() {
@@ -2473,8 +2538,9 @@ function bindEvents() {
   els.exportBtn.addEventListener("click", exportCSV);
 }
 
-async function init() {
+async function startApp() {
   try {
+    showApp();
     await loadMasterData();
     await loadMessageTemplates();
     await loadClients();
@@ -2491,6 +2557,15 @@ async function init() {
   } catch (error) {
     document.body.innerHTML = `<main class="main"><div class="panel"><h2>GPA V3 could not load</h2><p class="task-meta">${escapeHtml(error.message)}</p></div></main>`;
   }
+}
+
+async function init() {
+  bindAuthEvents();
+  if (!(await authStatus())) {
+    showLogin();
+    return;
+  }
+  await startApp();
 }
 
 init();

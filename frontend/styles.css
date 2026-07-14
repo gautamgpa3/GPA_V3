@@ -70,6 +70,49 @@ button {
   cursor: pointer;
 }
 
+[hidden] {
+  display: none !important;
+}
+
+.login-shell {
+  align-items: center;
+  display: grid;
+  min-height: 100vh;
+  padding: 28px;
+  position: relative;
+  z-index: 1;
+}
+
+.login-card {
+  background: linear-gradient(150deg, rgba(225, 25, 55, 0.16), transparent 42%), var(--panel);
+  border: 1px solid rgba(225, 25, 55, 0.3);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 26px;
+  margin: 0 auto;
+  max-width: 430px;
+  padding: 28px;
+  width: min(100%, 430px);
+}
+
+.login-form {
+  display: grid;
+  gap: 16px;
+}
+
+.login-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.login-form span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 270px minmax(0, 1fr);

@@ -19,6 +19,7 @@ logs/
 
 # Environment
 .env
+gpa_credentials.txt
 
 # OS
 Thumbs.db
