@@ -41,6 +41,12 @@ class ParsedContact:
     notes: str = ""
 
 
+@dataclass
+class CardDavResponse:
+    body: bytes
+    url: str
+
+
 def sync_credentials_path() -> Path:
     return Path(getenv("GPA_ICLOUD_CONTACTS_FILE", DEFAULT_SYNC_FILE))
 
@@ -67,7 +73,7 @@ def load_icloud_credentials(path: Path | None = None) -> ICloudCredentials:
     return ICloudCredentials(apple_id=apple_id, app_specific_password=password)
 
 
-def carddav_request(credentials: ICloudCredentials, method: str, url: str, body: str = "", depth: str = "0") -> bytes:
+def carddav_request_with_url(credentials: ICloudCredentials, method: str, url: str, body: str = "", depth: str = "0") -> CardDavResponse:
     auth = base64.b64encode(f"{credentials.apple_id}:{credentials.app_specific_password}".encode("utf-8")).decode("ascii")
     headers = {
         "Authorization": f"Basic {auth}",
@@ -78,12 +84,16 @@ def carddav_request(credentials: ICloudCredentials, method: str, url: str, body:
     request = Request(url, data=body.encode("utf-8") if body else None, headers=headers, method=method)
     try:
         with urlopen(request, timeout=45) as response:
-            return response.read()
+            return CardDavResponse(body=response.read(), url=response.geturl())
     except HTTPError as error:
         detail = error.read().decode("utf-8", errors="ignore")
         raise RuntimeError(f"iCloud CardDAV request failed: HTTP {error.code} {detail[:250]}") from error
     except URLError as error:
         raise RuntimeError(f"iCloud CardDAV connection failed: {error.reason}") from error
+
+
+def carddav_request(credentials: ICloudCredentials, method: str, url: str, body: str = "", depth: str = "0") -> bytes:
+    return carddav_request_with_url(credentials, method, url, body, depth).body
 
 
 def first_href(xml_bytes: bytes, xpath: str) -> str:
@@ -92,30 +102,69 @@ def first_href(xml_bytes: bytes, xpath: str) -> str:
     return href.text.strip() if href is not None and href.text else ""
 
 
+def all_hrefs(xml_bytes: bytes) -> list[str]:
+    root = ElementTree.fromstring(xml_bytes)
+    return [href.text.strip() for href in root.findall(".//d:href", NS) if href.text and href.text.strip()]
+
+
+def response_preview(xml_bytes: bytes) -> str:
+    text = xml_bytes.decode("utf-8", errors="ignore")
+    compact = " ".join(text.split())
+    return compact[:400]
+
+
+def first_addressbook_home(xml_bytes: bytes) -> str:
+    return first_href(xml_bytes, ".//card:addressbook-home-set/d:href")
+
+
+def discover_addressbook_home(credentials: ICloudCredentials, url: str) -> tuple[str, str]:
+    home_body = """<?xml version="1.0" encoding="utf-8"?>
+<d:propfind xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:prop><card:addressbook-home-set /></d:prop>
+</d:propfind>"""
+    response = carddav_request_with_url(credentials, "PROPFIND", url, home_body)
+    home_href = first_addressbook_home(response.body)
+    if home_href:
+        return home_href, response.url
+    return "", response_preview(response.body)
+
+
 def discover_addressbook_url(credentials: ICloudCredentials) -> str:
     principal_body = """<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:">
   <d:prop><d:current-user-principal /></d:prop>
 </d:propfind>"""
-    principal_response = carddav_request(credentials, "PROPFIND", urljoin(ICLOUD_CARDDAV_ROOT, ".well-known/carddav"), principal_body)
-    principal_href = first_href(principal_response, ".//d:current-user-principal/d:href")
-    if not principal_href:
-        raise RuntimeError("Could not discover iCloud CardDAV principal")
+    principal = carddav_request_with_url(credentials, "PROPFIND", urljoin(ICLOUD_CARDDAV_ROOT, ".well-known/carddav"), principal_body)
+    base_url = principal.url
+    principal_href = first_href(principal.body, ".//d:current-user-principal/d:href")
+    home_href = first_addressbook_home(principal.body)
+    debug_preview = response_preview(principal.body)
 
-    home_body = """<?xml version="1.0" encoding="utf-8"?>
-<d:propfind xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
-  <d:prop><card:addressbook-home-set /></d:prop>
-</d:propfind>"""
-    home_response = carddav_request(credentials, "PROPFIND", urljoin(ICLOUD_CARDDAV_ROOT, principal_href), home_body)
-    home_href = first_href(home_response, ".//card:addressbook-home-set/d:href")
+    if not home_href and principal_href:
+        home_href, debug_preview = discover_addressbook_home(credentials, urljoin(base_url, principal_href))
+
     if not home_href:
-        raise RuntimeError("Could not discover iCloud address book home")
+        for href in all_hrefs(principal.body):
+            if href == principal_href:
+                continue
+            home_href, debug_preview = discover_addressbook_home(credentials, urljoin(base_url, href))
+            if home_href:
+                break
+
+    if not home_href:
+        for candidate in (base_url, ICLOUD_CARDDAV_ROOT):
+            home_href, debug_preview = discover_addressbook_home(credentials, candidate)
+            if home_href:
+                break
+
+    if not home_href:
+        raise RuntimeError(f"Could not discover iCloud address book home. Apple response preview: {debug_preview}")
 
     books_body = """<?xml version="1.0" encoding="utf-8"?>
 <d:propfind xmlns:d="DAV:">
   <d:prop><d:resourcetype /><d:displayname /></d:prop>
 </d:propfind>"""
-    books_response = carddav_request(credentials, "PROPFIND", urljoin(ICLOUD_CARDDAV_ROOT, home_href), books_body, depth="1")
+    books_response = carddav_request(credentials, "PROPFIND", urljoin(base_url, home_href), books_body, depth="1")
     root = ElementTree.fromstring(books_response)
     fallback = ""
     for response in root.findall("d:response", NS):
@@ -126,9 +175,9 @@ def discover_addressbook_url(credentials: ICloudCredentials) -> str:
         if not fallback and href_text != home_href:
             fallback = href_text
         if response.find(".//d:resourcetype/card:addressbook", NS) is not None:
-            return urljoin(ICLOUD_CARDDAV_ROOT, href_text)
+            return urljoin(base_url, href_text)
     if fallback:
-        return urljoin(ICLOUD_CARDDAV_ROOT, fallback)
+        return urljoin(base_url, fallback)
     raise RuntimeError("No iCloud address book was found")
 
 
