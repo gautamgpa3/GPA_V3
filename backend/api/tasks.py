@@ -623,11 +623,38 @@ def assistant_task_title(text: str) -> str:
     for prefix in ("remind me to", "remind me", "schedule", "add", "create task"):
         if cleaned.lower().startswith(prefix):
             cleaned = cleaned[len(prefix):].strip()
-    for marker in (" tomorrow", " next monday", " after "):
+    for marker in (" tomorrow", " next monday", " after ", " high priority", " urgent", " normal priority", " low priority"):
         index = cleaned.lower().find(marker)
         if index >= 0:
             cleaned = cleaned[:index].strip()
     return cleaned[:200] or "Voice task"
+
+
+def assistant_priority(text: str) -> str:
+    lower = text.lower()
+    if "urgent" in lower:
+        return "Urgent"
+    if "high priority" in lower or "important" in lower:
+        return "High"
+    if "low priority" in lower:
+        return "Low"
+    return "Normal"
+
+
+def assistant_should_create_task(text: str) -> bool:
+    lower = text.lower().strip()
+    starts = (
+        "add",
+        "call",
+        "create task",
+        "follow up",
+        "pay",
+        "remind me",
+        "review",
+        "schedule",
+        "send",
+    )
+    return any(lower.startswith(prefix) for prefix in starts) or "remind me to" in lower
 
 
 def task_matches(task: Task, text: str) -> bool:
@@ -1315,16 +1342,16 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
         session.refresh(task)
         return {"action": "COMPLETED_TASK", "message": f"Completed: {task.title}", "task": task}
 
-    if "remind me" in lower or lower.startswith("schedule") or lower.startswith("add"):
+    if assistant_should_create_task(lower):
         due = parse_assistant_date(lower)
         title = assistant_task_title(text)
         task = Task(
             title=title,
             description=f"Captured from assistant: {text}",
             category="Client",
-            priority="Normal",
+            priority=assistant_priority(lower),
             status="Pending",
-            start_date=date.today(),
+            start_date=due,
             due_date=due,
             owner="Me",
             notes=text,
