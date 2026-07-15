@@ -32,6 +32,8 @@ TASK_COLUMNS = {
     "priority": "TEXT DEFAULT 'Normal'",
     "status": "TEXT DEFAULT 'Pending'",
     "client_id": "INTEGER",
+    "task_time": "TEXT DEFAULT ''",
+    "topic": "TEXT DEFAULT ''",
     "start_date": "DATE",
     "due_date": "DATE",
     "reminder": "BOOLEAN DEFAULT 1",
@@ -110,6 +112,8 @@ def migrate_task_table():
         connection.execute(text("UPDATE tasks SET category = 'Client' WHERE category IS NULL OR category = '' OR category = 'General'"))
         connection.execute(text("UPDATE tasks SET priority = 'Normal' WHERE priority IS NULL OR priority = '' OR priority = 'Medium'"))
         connection.execute(text("UPDATE tasks SET status = 'Pending' WHERE status IS NULL OR status = ''"))
+        connection.execute(text("UPDATE tasks SET task_time = '' WHERE task_time IS NULL"))
+        connection.execute(text("UPDATE tasks SET topic = '' WHERE topic IS NULL"))
         connection.execute(text("UPDATE tasks SET start_date = :today WHERE start_date IS NULL"), {"today": today})
         connection.execute(text("UPDATE tasks SET reminder = 1 WHERE reminder IS NULL"))
         connection.execute(text("UPDATE tasks SET repeat_type = 'None' WHERE repeat_type IS NULL OR repeat_type = ''"))

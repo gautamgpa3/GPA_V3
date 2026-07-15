@@ -106,13 +106,13 @@
             <button class="mic-button" id="voiceBtn" title="Speak a task" aria-label="Speak a task">
               <span aria-hidden="true">Mic</span>
             </button>
-            <input id="quickInput" type="text" placeholder="Try: Remind me to call Kalpesh tomorrow morning" />
+            <input id="quickInput" type="text" placeholder="Try: Call Kalpesh tomorrow at 10:30 topic GST documents notes collect bank statement" />
             <button class="secondary-button" id="parseQuickBtn">Ask AI</button>
           </div>
           <div class="chips">
-            <button class="chip" data-template="Call client tomorrow high priority">Call tomorrow</button>
-            <button class="chip" data-template="Review weekly report every week">Weekly report</button>
-            <button class="chip" data-template="Pay office rent every month on 5th">Monthly fixed date</button>
+            <button class="chip" data-template="Call client tomorrow at 10:00 topic follow-up high priority">Call tomorrow</button>
+            <button class="chip" data-template="Review weekly report next monday at 11:00 topic weekly report">Weekly report</button>
+            <button class="chip" data-template="Pay office rent after 1 days at 10:00 topic office rent">Monthly fixed date</button>
             <button class="chip" data-template="Quarterly compliance review every quarter">Quarterly</button>
           </div>
         </section>
@@ -147,6 +147,14 @@
           <label class="full">
             <span>Description</span>
             <textarea id="taskDescription" rows="3"></textarea>
+          </label>
+          <label>
+            <span>Topic</span>
+            <input id="taskTopic" maxlength="200" placeholder="Example: GST documents, quotation, meeting" />
+          </label>
+          <label>
+            <span>Time</span>
+            <input id="taskTime" type="time" />
           </label>
           <div class="field-block">
             <div class="field-head"><span>Client</span><button class="inline-link" id="quickAddClientBtn" type="button">Add</button></div>

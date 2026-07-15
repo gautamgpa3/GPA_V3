@@ -107,6 +107,8 @@ const els = {
     id: document.querySelector("#taskId"),
     title: document.querySelector("#taskTitle"),
     description: document.querySelector("#taskDescription"),
+    topic: document.querySelector("#taskTopic"),
+    task_time: document.querySelector("#taskTime"),
     client_id: document.querySelector("#taskClient"),
     priority: document.querySelector("#taskPriority"),
     status: document.querySelector("#taskStatus"),
@@ -304,6 +306,8 @@ function normalizeTask(task) {
     priority: task.priority || "Normal",
     status: task.status || "Pending",
     client_id: task.client_id || "",
+    task_time: task.task_time || "",
+    topic: task.topic || "",
     start_date: task.start_date || todayISO(),
     due_date: task.due_date || "",
     reminder: Boolean(task.reminder),
@@ -668,7 +672,8 @@ function taskCard(task) {
       <div class="task-row">
         <div>
           <button class="task-title" data-action="edit" data-id="${task.id}">${escapeHtml(taskDisplayTitle(task))}</button>
-          <div class="task-meta">${escapeHtml(task.category)} - ${formatDate(task.due_date)} - ${startText}</div>
+          <div class="task-meta">${escapeHtml(task.category)} - ${formatDate(task.due_date)}${task.task_time ? ` at ${escapeHtml(task.task_time)}` : ""} - ${startText}</div>
+          ${task.topic ? `<div class="task-meta">Topic: ${escapeHtml(task.topic)}</div>` : ""}
         </div>
         ${d.isDone ? "" : `<button class="icon-button" data-action="complete" data-id="${task.id}" title="Mark complete">OK</button>`}
       </div>
@@ -1545,6 +1550,8 @@ function openTaskDialog(task = null) {
     id: "",
     title: "",
     description: "",
+    topic: "",
+    task_time: "",
     category: "Client",
     client_id: "",
     priority: state.master.priorities[0] || "Normal",
@@ -1571,6 +1578,8 @@ function readForm() {
   return {
     title: els.fields.title.value.trim(),
     description: els.fields.description.value.trim(),
+    topic: els.fields.topic.value.trim(),
+    task_time: els.fields.task_time.value,
     category: selectedTaskCategory(),
     priority: els.fields.priority.value,
     status: els.fields.status.value,
@@ -2216,9 +2225,11 @@ function exportCSV() {
     "UUID",
     "Title",
     "Description",
+    "Topic",
     "Category",
     "Priority",
     "Status",
+    "Task Time",
     "Client ID",
     "Client Name",
     "Client Category",
@@ -2256,9 +2267,11 @@ function exportCSV() {
       task.uuid,
       task.title,
       task.description,
+      task.topic,
       task.category,
       task.priority,
       task.status,
+      task.task_time,
       task.client_id,
       client?.name,
       client?.category,
@@ -2310,9 +2323,11 @@ function exportCSV() {
       task.uuid || activity.entity_uuid,
       task.title || "",
       task.description || "",
+      task.topic || "",
       task.category || "",
       task.priority || "",
       task.status || "",
+      task.task_time || "",
       task.client_id || "",
       client?.name,
       client?.category,

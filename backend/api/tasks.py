@@ -25,6 +25,8 @@ class TaskBase(BaseModel):
     priority: str = "Normal"
     status: str = "Pending"
     client_id: int | None = None
+    task_time: str = ""
+    topic: str = ""
     start_date: date | None = None
     due_date: date
     reminder: bool = True
@@ -179,6 +181,8 @@ TASK_AUDIT_FIELDS = [
     "priority",
     "status",
     "client_id",
+    "task_time",
+    "topic",
     "start_date",
     "due_date",
     "reminder",
@@ -247,6 +251,8 @@ def normalize_task_data(task_data: TaskCreate | TaskUpdate, session: Session) ->
     data["category"] = data["category"].strip() or "Client"
     data["priority"] = data["priority"].strip() or "Normal"
     data["status"] = data["status"].strip() or "Pending"
+    data["task_time"] = data["task_time"].strip()
+    data["topic"] = data["topic"].strip()
     data["repeat_type"] = data["repeat_type"].strip() or "None"
     data["owner"] = data["owner"].strip() or "Me"
     data["issue"] = data["issue"].strip()
@@ -264,6 +270,8 @@ def normalize_task_data(task_data: TaskCreate | TaskUpdate, session: Session) ->
     client = session.get(Client, data["client_id"]) if data["client_id"] is not None else None
     if data["client_id"] is not None and not client:
         raise HTTPException(status_code=400, detail="Selected client does not exist")
+    if data["task_time"] and not fullmatch(r"^([01]\d|2[0-3]):[0-5]\d$", data["task_time"]):
+        raise HTTPException(status_code=400, detail="Task time must be in HH:MM format")
     if client:
         data["category"] = client.category or "Client"
     ensure_master_value(session, Category, data["category"], "category")
@@ -296,6 +304,8 @@ def create_next_occurrence(task: Task) -> Task | None:
         priority=task.priority,
         status="Pending",
         client_id=task.client_id,
+        task_time=task.task_time,
+        topic=task.topic,
         start_date=next_start or next_due,
         due_date=next_due,
         reminder=task.reminder,
@@ -623,7 +633,7 @@ def assistant_task_title(text: str) -> str:
     for prefix in ("remind me to", "remind me", "schedule", "add", "create task"):
         if cleaned.lower().startswith(prefix):
             cleaned = cleaned[len(prefix):].strip()
-    for marker in (" tomorrow", " next monday", " after ", " high priority", " urgent", " normal priority", " low priority"):
+    for marker in (" tomorrow", " next monday", " after ", " at ", " by ", " topic ", " regarding ", " about ", " details ", " note ", " notes ", " high priority", " urgent", " normal priority", " low priority"):
         index = cleaned.lower().find(marker)
         if index >= 0:
             cleaned = cleaned[:index].strip()
@@ -655,6 +665,61 @@ def assistant_should_create_task(text: str) -> bool:
         "send",
     )
     return any(lower.startswith(prefix) for prefix in starts) or "remind me to" in lower
+
+
+def assistant_task_time(text: str) -> str:
+    lower = text.lower()
+    match = search(r"\b(?:at|by)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", lower)
+    if not match:
+        if "morning" in lower:
+            return "09:00"
+        if "afternoon" in lower:
+            return "14:00"
+        if "evening" in lower:
+            return "18:00"
+        if "night" in lower:
+            return "20:00"
+        return ""
+    hour = int(match.group(1))
+    minute = int(match.group(2) or "0")
+    suffix = match.group(3)
+    if suffix == "pm" and hour < 12:
+        hour += 12
+    if suffix == "am" and hour == 12:
+        hour = 0
+    if hour > 23 or minute > 59:
+        return ""
+    return f"{hour:02d}:{minute:02d}"
+
+
+def assistant_topic(text: str) -> str:
+    match = search(r"(?i)\b(?:topic|regarding|about)\s+(.+)$", text)
+    if not match:
+        return ""
+    topic = match.group(1).strip()
+    for marker in (" details ", " note ", " notes ", " high priority", " urgent", " normal priority", " low priority"):
+        index = topic.lower().find(marker)
+        if index >= 0:
+            topic = topic[:index].strip()
+    return topic[:200]
+
+
+def assistant_details(text: str) -> str:
+    match = search(r"(?i)\b(?:details|note|notes)\s+(.+)$", text)
+    if not match:
+        return ""
+    details = match.group(1).strip()
+    for marker in (" high priority", " urgent", " normal priority", " low priority"):
+        index = details.lower().find(marker)
+        if index >= 0:
+            details = details[:index].strip()
+    return details[:1000]
+
+
+def assistant_client(session: Session, text: str) -> Client | None:
+    lower = text.lower()
+    clients = session.exec(select(Client).where(Client.active == True).order_by(Client.name)).all()  # noqa: E712
+    return next((client for client in clients if client.name.lower() in lower), None)
 
 
 def task_matches(task: Task, text: str) -> bool:
@@ -1345,16 +1410,24 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
     if assistant_should_create_task(lower):
         due = parse_assistant_date(lower)
         title = assistant_task_title(text)
+        client = assistant_client(session, text)
+        topic = assistant_topic(text)
+        task_time = assistant_task_time(text)
+        details = assistant_details(text)
+        notes = details or text
         task = Task(
             title=title,
             description=f"Captured from assistant: {text}",
-            category="Client",
+            category=client.category if client else "Client",
             priority=assistant_priority(lower),
             status="Pending",
+            client_id=client.id if client else None,
+            task_time=task_time,
+            topic=topic,
             start_date=due,
             due_date=due,
             owner="Me",
-            notes=text,
+            notes=notes,
         )
         session.add(task)
         session.flush()
