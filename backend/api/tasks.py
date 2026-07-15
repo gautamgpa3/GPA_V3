@@ -634,7 +634,7 @@ def assistant_task_title(text: str) -> str:
     for prefix in ("remind me to", "remind me", "schedule", "add", "create task"):
         if cleaned.lower().startswith(prefix):
             cleaned = cleaned[len(prefix):].strip()
-    for marker in (" tomorrow", " next monday", " after ", " at ", " by ", " topic ", " regarding ", " about ", " details ", " note ", " notes ", " high priority", " urgent", " normal priority", " low priority"):
+    for marker in (" tomorrow", " next monday", " after ", " at ", " by ", " time ", " topic ", " regarding ", " about ", " details ", " note ", " notes ", " high priority", " urgent", " normal priority", " low priority"):
         index = cleaned.lower().find(marker)
         if index >= 0:
             cleaned = cleaned[:index].strip()
@@ -670,7 +670,7 @@ def assistant_should_create_task(text: str) -> bool:
 
 def assistant_task_time(text: str) -> str:
     lower = text.lower()
-    match = search(r"\b(?:at|by)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", lower)
+    match = search(r"\b(?:at|by|time)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b", lower)
     if not match:
         if "morning" in lower:
             return "09:00"
@@ -1427,10 +1427,9 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
         topic = assistant_topic(text)
         task_time = assistant_task_time(text)
         details = assistant_details(text)
-        notes = details or text
         task = Task(
             title=title,
-            description=f"Captured from assistant: {text}",
+            description="",
             category=client.category if client else "Client",
             priority=assistant_priority(lower),
             status="Pending",
@@ -1440,7 +1439,7 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
             start_date=due,
             due_date=due,
             owner="Me",
-            notes=notes,
+            notes=details,
         )
         session.add(task)
         session.flush()
