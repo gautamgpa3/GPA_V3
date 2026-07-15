@@ -20,6 +20,8 @@ logs/
 # Environment
 .env
 gpa_credentials.txt
+contact_sync_credentials.txt
+icloud_contacts.env
 
 # OS
 Thumbs.db

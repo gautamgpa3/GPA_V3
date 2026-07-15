@@ -192,6 +192,70 @@ cd /opt/gpa-v3/app
 /opt/gpa-v3/venv/bin/python -m backend.jobs.telegram_reminder --force
 ```
 
+## 12. Enable iCloud contacts sync
+
+This is one-way sync:
+
+```text
+iPhone Contacts -> iCloud -> GPA V3 Contacts
+```
+
+GPA does not delete or edit contacts on your iPhone.
+
+Create an Apple app-specific password from Apple ID security settings. Do not use your main Apple ID password.
+
+Create the server-only secrets file:
+
+```bash
+mkdir -p /opt/gpa-v3/secrets
+nano /opt/gpa-v3/secrets/icloud_contacts.env
+```
+
+Set:
+
+```env
+APPLE_ID=your-apple-id@example.com
+APP_SPECIFIC_PASSWORD=xxxx-xxxx-xxxx-xxxx
+```
+
+Lock the file:
+
+```bash
+chown -R gpa:gpa /opt/gpa-v3/secrets
+chmod 700 /opt/gpa-v3/secrets
+chmod 600 /opt/gpa-v3/secrets/icloud_contacts.env
+```
+
+Test without saving:
+
+```bash
+cd /opt/gpa-v3/app
+GPA_ICLOUD_CONTACTS_FILE=/opt/gpa-v3/secrets/icloud_contacts.env /opt/gpa-v3/venv/bin/python -m backend.jobs.icloud_contacts_sync --dry-run
+```
+
+Run one real sync:
+
+```bash
+cd /opt/gpa-v3/app
+GPA_ICLOUD_CONTACTS_FILE=/opt/gpa-v3/secrets/icloud_contacts.env /opt/gpa-v3/venv/bin/python -m backend.jobs.icloud_contacts_sync
+```
+
+Install automatic sync every 30 minutes:
+
+```bash
+cp /opt/gpa-v3/app/deploy/gpa-v3-icloud-contacts-sync.service /etc/systemd/system/gpa-v3-icloud-contacts-sync.service
+cp /opt/gpa-v3/app/deploy/gpa-v3-icloud-contacts-sync.timer /etc/systemd/system/gpa-v3-icloud-contacts-sync.timer
+systemctl daemon-reload
+systemctl enable --now gpa-v3-icloud-contacts-sync.timer
+systemctl list-timers gpa-v3-icloud-contacts-sync.timer
+```
+
+Manual sync is also available in GPA:
+
+```text
+Contacts -> Sync iCloud
+```
+
 ## Update later
 
 ```bash

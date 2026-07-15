@@ -14,6 +14,7 @@ from backend.models.master_data import Category, Owner, Priority, RepeatType, St
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
+from backend.services.icloud_contacts import sync_icloud_contacts
 
 router = APIRouter(prefix="/api", tags=["Tasks"])
 
@@ -1113,6 +1114,18 @@ def import_contacts(import_data: ContactImport, session: Session = Depends(get_s
     log_activity(session, "IMPORTED", "contact", f"Imported contacts: {created} created, {updated} updated, {skipped} skipped")
     session.commit()
     return {"success": True, "created": created, "updated": updated, "skipped": skipped}
+
+
+@router.post("/contacts/sync/icloud")
+def sync_contacts_from_icloud(session: Session = Depends(get_session)):
+    try:
+        return sync_icloud_contacts(session)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @router.post("/contacts/{contact_id}/make-client")

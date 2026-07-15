@@ -1232,12 +1232,13 @@ function renderContacts() {
       <div class="panel-head">
         <h3>Contacts / telephone diary</h3>
         <div class="inline-actions">
+          <button class="secondary-button" data-action="sync-icloud-contacts">Sync iCloud</button>
           <button class="secondary-button" data-action="import-contacts">Import</button>
           <button class="secondary-button" data-action="export-contacts">Export</button>
           <button class="primary-button" data-action="add-contact">Add contact</button>
         </div>
       </div>
-      <div class="task-note">Import supports CSV and iPhone vCard (.vcf) exports. Automatic iPhone contact sync needs a native app/iCloud integration later; browsers do not provide silent contact sync.</div>
+      <div class="task-note">Sync iCloud imports iPhone contacts through iCloud Contacts. It only adds/updates GPA contacts and does not delete or edit your phone contacts.</div>
       <div class="client-grid">
         ${state.contacts
           .map(
@@ -1356,6 +1357,19 @@ async function makeClientFromContact(contactId) {
   await loadActivity();
   populateMasterControls();
   render();
+}
+
+async function syncIcloudContacts() {
+  if (!window.confirm("Sync contacts from iCloud into GPA now? This will not change your iPhone contacts.")) return;
+  try {
+    const result = await api(`${API_CONTACTS_URL}/sync/icloud`, { method: "POST" });
+    await loadContacts();
+    await loadActivity();
+    render();
+    window.alert(`iCloud sync complete. Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}`);
+  } catch (error) {
+    window.alert(error.message);
+  }
 }
 
 function masterList(title, type, items) {
@@ -2474,6 +2488,10 @@ function bindEvents() {
     }
     if (target.dataset.action === "export-contacts") {
       exportContactsCSV();
+      return;
+    }
+    if (target.dataset.action === "sync-icloud-contacts") {
+      syncIcloudContacts();
       return;
     }
     if (target.dataset.action === "contact-whatsapp") {
