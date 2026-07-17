@@ -256,6 +256,84 @@ Manual sync is also available in GPA:
 Contacts -> Sync iCloud
 ```
 
+## 13. Enable Google contacts sync
+
+Google sync has two parts:
+
+```text
+Google Contacts -> GPA V3 Contacts
+GPA V3 Contacts -> Google Contacts only when you click Push Google
+```
+
+On your iPhone, add the same Google account under Contacts. Then contacts created in Google will appear on your phone through Google contact sync.
+
+Create a Google Cloud OAuth client, enable the Google People API, and generate a refresh token with this scope:
+
+```text
+https://www.googleapis.com/auth/contacts
+```
+
+Create the server-only secrets file:
+
+```bash
+mkdir -p /opt/gpa-v3/secrets
+nano /opt/gpa-v3/secrets/google_contacts.env
+```
+
+Set:
+
+```env
+CLIENT_ID=your-google-oauth-client-id
+CLIENT_SECRET=your-google-oauth-client-secret
+REFRESH_TOKEN=your-google-refresh-token
+```
+
+Lock the file:
+
+```bash
+chown -R gpa:gpa /opt/gpa-v3/secrets
+chmod 700 /opt/gpa-v3/secrets
+chmod 600 /opt/gpa-v3/secrets/google_contacts.env
+```
+
+Test Google to GPA without saving:
+
+```bash
+cd /opt/gpa-v3/app
+GPA_GOOGLE_CONTACTS_FILE=/opt/gpa-v3/secrets/google_contacts.env /opt/gpa-v3/venv/bin/python -m backend.jobs.google_contacts_sync --dry-run
+```
+
+Run one real Google to GPA sync:
+
+```bash
+cd /opt/gpa-v3/app
+GPA_GOOGLE_CONTACTS_FILE=/opt/gpa-v3/secrets/google_contacts.env /opt/gpa-v3/venv/bin/python -m backend.jobs.google_contacts_sync
+```
+
+Test GPA to Google without saving:
+
+```bash
+cd /opt/gpa-v3/app
+GPA_GOOGLE_CONTACTS_FILE=/opt/gpa-v3/secrets/google_contacts.env /opt/gpa-v3/venv/bin/python -m backend.jobs.google_contacts_sync --push --dry-run
+```
+
+Install automatic Google to GPA sync every 30 minutes:
+
+```bash
+cp /opt/gpa-v3/app/deploy/gpa-v3-google-contacts-sync.service /etc/systemd/system/gpa-v3-google-contacts-sync.service
+cp /opt/gpa-v3/app/deploy/gpa-v3-google-contacts-sync.timer /etc/systemd/system/gpa-v3-google-contacts-sync.timer
+systemctl daemon-reload
+systemctl enable --now gpa-v3-google-contacts-sync.timer
+systemctl list-timers gpa-v3-google-contacts-sync.timer
+```
+
+Manual sync is also available in GPA:
+
+```text
+Contacts -> Sync Google
+Contacts -> Push Google
+```
+
 ## Update later
 
 ```bash

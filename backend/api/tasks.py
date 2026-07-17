@@ -14,6 +14,7 @@ from backend.models.master_data import Category, Owner, Priority, RepeatType, St
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
+from backend.services.google_contacts import push_gpa_contacts_to_google, sync_google_contacts
 from backend.services.icloud_contacts import sync_icloud_contacts
 
 router = APIRouter(prefix="/api", tags=["Tasks"])
@@ -1120,6 +1121,30 @@ def import_contacts(import_data: ContactImport, session: Session = Depends(get_s
 def sync_contacts_from_icloud(session: Session = Depends(get_session)):
     try:
         return sync_icloud_contacts(session)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.post("/contacts/sync/google")
+def sync_contacts_from_google(session: Session = Depends(get_session)):
+    try:
+        return sync_google_contacts(session)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.post("/contacts/push/google")
+def push_contacts_to_google(session: Session = Depends(get_session)):
+    try:
+        return push_gpa_contacts_to_google(session)
     except FileNotFoundError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except ValueError as error:

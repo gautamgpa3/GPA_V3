@@ -1,0 +1,11 @@
+[Unit]
+Description=Run GPA V3 Google contacts sync every 30 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+Persistent=true
+Unit=gpa-v3-google-contacts-sync.service
+
+[Install]
+WantedBy=timers.target

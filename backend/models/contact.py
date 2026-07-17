@@ -15,6 +15,8 @@ class Contact(SQLModel, table=True):
     company: str = ""
     address: str = ""
     notes: str = ""
+    google_resource_name: str = ""
+    google_etag: str = ""
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

@@ -1240,12 +1240,14 @@ function renderContacts() {
         <h3>Contacts / telephone diary</h3>
         <div class="inline-actions">
           <button class="secondary-button" data-action="sync-icloud-contacts">Sync iCloud</button>
+          <button class="secondary-button" data-action="sync-google-contacts">Sync Google</button>
+          <button class="secondary-button" data-action="push-google-contacts">Push Google</button>
           <button class="secondary-button" data-action="import-contacts">Import</button>
           <button class="secondary-button" data-action="export-contacts">Export</button>
           <button class="primary-button" data-action="add-contact">Add contact</button>
         </div>
       </div>
-      <div class="task-note">Sync iCloud imports iPhone contacts through iCloud Contacts. It only adds/updates GPA contacts and does not delete or edit your phone contacts.</div>
+      <div class="task-note">Sync imports iCloud or Google contacts into GPA. Push Google creates missing Google contacts from GPA; it does not delete phone contacts.</div>
       <div class="client-grid">
         ${state.contacts
           .map(
@@ -1374,6 +1376,32 @@ async function syncIcloudContacts() {
     await loadActivity();
     render();
     window.alert(`iCloud sync complete. Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}`);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function syncGoogleContacts() {
+  if (!window.confirm("Sync contacts from Google into GPA now? This will not change your Google contacts.")) return;
+  try {
+    const result = await api(`${API_CONTACTS_URL}/sync/google`, { method: "POST" });
+    await loadContacts();
+    await loadActivity();
+    render();
+    window.alert(`Google sync complete. Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}`);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function pushGoogleContacts() {
+  if (!window.confirm("Create missing Google contacts from GPA contacts now? This will add contacts to Google but will not delete anything.")) return;
+  try {
+    const result = await api(`${API_CONTACTS_URL}/push/google`, { method: "POST" });
+    await loadContacts();
+    await loadActivity();
+    render();
+    window.alert(`Google push complete. Created in Google: ${result.created}, Skipped: ${result.skipped}`);
   } catch (error) {
     window.alert(error.message);
   }
@@ -2503,6 +2531,14 @@ function bindEvents() {
     }
     if (target.dataset.action === "sync-icloud-contacts") {
       syncIcloudContacts();
+      return;
+    }
+    if (target.dataset.action === "sync-google-contacts") {
+      syncGoogleContacts();
+      return;
+    }
+    if (target.dataset.action === "push-google-contacts") {
+      pushGoogleContacts();
       return;
     }
     if (target.dataset.action === "contact-whatsapp") {

@@ -1,0 +1,13 @@
+[Unit]
+Description=GPA V3 Google contacts sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=gpa
+Group=gpa
+WorkingDirectory=/opt/gpa-v3/app
+EnvironmentFile=/opt/gpa-v3/app/.env
+Environment=GPA_GOOGLE_CONTACTS_FILE=/opt/gpa-v3/secrets/google_contacts.env
+ExecStart=/opt/gpa-v3/venv/bin/python -m backend.jobs.google_contacts_sync

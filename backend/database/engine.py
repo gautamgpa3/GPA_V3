@@ -66,6 +66,8 @@ CONTACT_COLUMNS = {
     "company": "TEXT DEFAULT ''",
     "address": "TEXT DEFAULT ''",
     "notes": "TEXT DEFAULT ''",
+    "google_resource_name": "TEXT DEFAULT ''",
+    "google_etag": "TEXT DEFAULT ''",
     "active": "BOOLEAN DEFAULT 1",
     "created_at": "DATETIME",
     "updated_at": "DATETIME",
@@ -164,6 +166,8 @@ def migrate_contact_table():
         connection.execute(text("UPDATE contacts SET company = '' WHERE company IS NULL"))
         connection.execute(text("UPDATE contacts SET address = '' WHERE address IS NULL"))
         connection.execute(text("UPDATE contacts SET notes = '' WHERE notes IS NULL"))
+        connection.execute(text("UPDATE contacts SET google_resource_name = '' WHERE google_resource_name IS NULL"))
+        connection.execute(text("UPDATE contacts SET google_etag = '' WHERE google_etag IS NULL"))
         connection.execute(text("UPDATE contacts SET active = 1 WHERE active IS NULL"))
 
 
