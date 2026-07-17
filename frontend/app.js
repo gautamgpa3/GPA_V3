@@ -30,6 +30,7 @@ const state = {
   resumeTaskAfterMasterType: "",
   resumeClientAfterMasterType: "",
   dashboardMetric: "",
+  dashboardExpanded: "",
   master: {
     categories: [],
     priorities: [],
@@ -701,13 +702,14 @@ function renderTaskList(tasks, emptyText = "No matching work") {
 }
 
 function renderDashboardTaskPreview(tasks, emptyText, metric, limit = 5) {
-  const visibleTasks = tasks.slice(0, limit);
+  const expanded = state.dashboardExpanded === metric;
+  const visibleTasks = expanded ? tasks : tasks.slice(0, limit);
   const moreCount = tasks.length - visibleTasks.length;
   return `
     ${renderTaskList(visibleTasks, emptyText)}
     ${
-      moreCount > 0
-        ? `<button class="secondary-button link-button" data-action="metric-details" data-metric="${metric}" type="button">More ${moreCount}</button>`
+      tasks.length > limit
+        ? `<button class="secondary-button link-button" data-action="dashboard-list-toggle" data-metric="${metric}" type="button">${expanded ? "Show less" : `More ${moreCount}`}</button>`
         : ""
     }
   `;
@@ -747,6 +749,11 @@ function dashboardMetricTasks(metric) {
 
 function showDashboardMetric(metric) {
   state.dashboardMetric = metric;
+  renderDashboard();
+}
+
+function toggleDashboardList(metric) {
+  state.dashboardExpanded = state.dashboardExpanded === metric ? "" : metric;
   renderDashboard();
 }
 
@@ -2458,6 +2465,10 @@ function bindEvents() {
     if (!target) return;
     if (target.dataset.action === "metric-details") {
       showDashboardMetric(target.dataset.metric);
+      return;
+    }
+    if (target.dataset.action === "dashboard-list-toggle") {
+      toggleDashboardList(target.dataset.metric);
       return;
     }
     if (target.dataset.action === "add-client") {
