@@ -137,7 +137,6 @@ const els = {
   },
   contactFields: {
     id: document.querySelector("#contactId"),
-    name: document.querySelector("#contactName"),
     first_name: document.querySelector("#contactFirstName"),
     last_name: document.querySelector("#contactLastName"),
     phone: document.querySelector("#contactPhone"),
@@ -1336,7 +1335,7 @@ function renderContacts() {
 function contactPayload() {
   const firstName = els.contactFields.first_name.value.trim();
   const lastName = els.contactFields.last_name.value.trim();
-  const displayName = els.contactFields.name.value.trim() || [firstName, lastName].filter(Boolean).join(" ");
+  const displayName = [firstName, lastName].filter(Boolean).join(" ");
   return {
     name: displayName,
     first_name: firstName,
@@ -1359,7 +1358,7 @@ function contactPayload() {
   };
 }
 function validateContactPayload(payload) {
-  if (!payload.name) return "First name, last name, or display name is required.";
+  if (!payload.name) return "First name or last name is required.";
   if (payload.phone && !isTenDigitPhone(payload.phone)) return "Mobile must be exactly 10 digits.";
   if (payload.whatsapp && !isTenDigitPhone(payload.whatsapp)) return "WhatsApp must be exactly 10 digits.";
   if (!isValidEmail(payload.email)) return "Email must be valid.";
@@ -1371,8 +1370,13 @@ function openContactDialog(contact = null) {
   els.contactForm.reset();
   els.deleteContactBtn.hidden = !contact;
   els.contactDialogTitle.textContent = contact ? "Edit contact" : "Add contact";
-  const defaults = { id: "", name: "", first_name: "", last_name: "", phone: "", phone_label: "Mobile", whatsapp: "", whatsapp_label: "WhatsApp", email: "", company: "", address: "", location_url: "", birth_date: "", important_date: "", important_date_label: "", related_name: "", social_profile: "", notes: "" };
+  const defaults = { id: "", first_name: "", last_name: "", phone: "", phone_label: "Mobile", whatsapp: "", whatsapp_label: "WhatsApp", email: "", company: "", address: "", location_url: "", birth_date: "", important_date: "", important_date_label: "", related_name: "", social_profile: "", notes: "" };
   const data = { ...defaults, ...(contact || {}) };
+  if (contact?.name && !data.first_name && !data.last_name) {
+    const parts = contact.name.split(" ").filter(Boolean);
+    data.first_name = parts.shift() || "";
+    data.last_name = parts.join(" ");
+  }
   Object.entries(els.contactFields).forEach(([key, field]) => {
     field.value = data[key] ?? "";
   });
