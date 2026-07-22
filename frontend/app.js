@@ -142,7 +142,6 @@ const els = {
     phone: document.querySelector("#contactPhone"),
     phone_label: document.querySelector("#contactPhoneLabel"),
     whatsapp: document.querySelector("#contactWhatsapp"),
-    whatsapp_label: document.querySelector("#contactWhatsappLabel"),
     email: document.querySelector("#contactEmail"),
     company: document.querySelector("#contactCompany"),
     address: document.querySelector("#contactAddress"),
@@ -1343,7 +1342,7 @@ function contactPayload() {
     phone: phoneDigits(els.contactFields.phone.value),
     phone_label: els.contactFields.phone_label.value.trim() || "Mobile",
     whatsapp: phoneDigits(els.contactFields.whatsapp.value),
-    whatsapp_label: els.contactFields.whatsapp_label.value.trim() || "WhatsApp",
+    whatsapp_label: "WhatsApp",
     email: emailValue(els.contactFields.email.value),
     company: els.contactFields.company.value.trim(),
     address: els.contactFields.address.value.trim(),
@@ -1370,7 +1369,7 @@ function openContactDialog(contact = null) {
   els.contactForm.reset();
   els.deleteContactBtn.hidden = !contact;
   els.contactDialogTitle.textContent = contact ? "Edit contact" : "Add contact";
-  const defaults = { id: "", first_name: "", last_name: "", phone: "", phone_label: "Mobile", whatsapp: "", whatsapp_label: "WhatsApp", email: "", company: "", address: "", location_url: "", birth_date: "", important_date: "", important_date_label: "", related_name: "", social_profile: "", notes: "" };
+  const defaults = { id: "", first_name: "", last_name: "", phone: "", phone_label: "Mobile", whatsapp: "", email: "", company: "", address: "", location_url: "", birth_date: "", important_date: "", important_date_label: "", related_name: "", social_profile: "", notes: "" };
   const data = { ...defaults, ...(contact || {}) };
   if (contact?.name && !data.first_name && !data.last_name) {
     const parts = contact.name.split(" ").filter(Boolean);
@@ -2327,9 +2326,9 @@ function parseVcfContacts(text) {
 }
 
 function exportContactsCSV() {
-  const headers = ["Name", "First Name", "Last Name", "Phone Tag", "Phone", "WhatsApp Tag", "WhatsApp", "Email", "Company", "Address", "Location URL", "Birthday", "Other Date Label", "Other Date", "Related Name", "Social Profile", "Notes"];
+  const headers = ["Name", "First Name", "Last Name", "Phone Tag", "Phone", "WhatsApp", "Email", "Company", "Address", "Location URL", "Birthday", "Other Date Label", "Other Date", "Related Name", "Social Profile", "Notes"];
   const rows = state.contacts.map((contact) =>
-    [contact.name, contact.first_name, contact.last_name, contact.phone_label, contact.phone, contact.whatsapp_label, contact.whatsapp, contact.email, contact.company, contact.address, contact.location_url, contact.birth_date, contact.important_date_label, contact.important_date, contact.related_name, contact.social_profile, contact.notes].map(csvCell).join(",")
+    [contact.name, contact.first_name, contact.last_name, contact.phone_label, contact.phone, contact.whatsapp, contact.email, contact.company, contact.address, contact.location_url, contact.birth_date, contact.important_date_label, contact.important_date, contact.related_name, contact.social_profile, contact.notes].map(csvCell).join(",")
   );
   downloadTextFile(`gpa-v3-contacts-${todayISO()}.csv`, [headers.map(csvCell).join(","), ...rows].join("\n"), "text/csv;charset=utf-8");
 }

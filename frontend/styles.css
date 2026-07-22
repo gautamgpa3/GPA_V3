@@ -1125,6 +1125,11 @@ label.full,
   grid-column: 1 / -1;
 }
 
+.paired-fields {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(110px, 0.42fr) minmax(160px, 1fr);
+}
 .field-head {
   align-items: center;
   display: flex;
@@ -1256,6 +1261,7 @@ textarea {
   .nav,
   .metric-grid,
   .form-grid,
+  .paired-fields,
   .calendar-grid {
     grid-template-columns: 1fr;
   }

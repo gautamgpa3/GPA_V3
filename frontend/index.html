@@ -292,30 +292,22 @@
             <span>Company</span>
             <input id="contactCompany" maxlength="200" autocomplete="organization" />
           </label>
-          <label>
-            <span>Phone tag</span>
-            <select id="contactPhoneLabel">
-              <option>Mobile</option>
-              <option>Home</option>
-              <option>Work</option>
-              <option>Main</option>
-              <option>Other</option>
-            </select>
-          </label>
-          <label>
-            <span>Phone</span>
-            <input id="contactPhone" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
-          </label>
-          <label>
-            <span>WhatsApp tag</span>
-            <select id="contactWhatsappLabel">
-              <option>WhatsApp</option>
-              <option>Mobile</option>
-              <option>Home</option>
-              <option>Work</option>
-              <option>Other</option>
-            </select>
-          </label>
+          <div class="paired-fields">
+            <label>
+              <span>Phone tag</span>
+              <select id="contactPhoneLabel">
+                <option>Mobile</option>
+                <option>Home</option>
+                <option>Work</option>
+                <option>Main</option>
+                <option>Other</option>
+              </select>
+            </label>
+            <label>
+              <span>Phone</span>
+              <input id="contactPhone" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
+            </label>
+          </div>
           <label>
             <span>WhatsApp</span>
             <input id="contactWhatsapp" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
