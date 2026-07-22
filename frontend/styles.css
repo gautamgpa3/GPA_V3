@@ -1128,7 +1128,8 @@ label.full,
 .paired-fields {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(110px, 0.42fr) minmax(160px, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(190px, 0.72fr) minmax(180px, 1fr);
 }
 .field-head {
   align-items: center;
