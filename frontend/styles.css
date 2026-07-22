@@ -1129,7 +1129,16 @@ label.full,
   display: grid;
   gap: 10px;
   grid-column: 1 / -1;
-  grid-template-columns: minmax(190px, 0.72fr) minmax(180px, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.8fr);
+}
+
+.paired-fields > label {
+  min-width: 0;
+}
+
+.paired-fields span {
+  line-height: 1.2;
+  white-space: normal;
 }
 .field-head {
   align-items: center;
@@ -1170,8 +1179,10 @@ label textarea,
   border-radius: 8px;
   color: var(--text);
   min-height: 42px;
+  min-width: 0;
   padding: 9px 10px;
   text-transform: none;
+  width: 100%;
 }
 
 label input::placeholder,
