@@ -46,6 +46,7 @@ const state = {
     horizon: "All",
   },
   search: "",
+  contactSearch: "",
 };
 
 const dialogSnapshots = new WeakMap();
@@ -137,11 +138,21 @@ const els = {
   contactFields: {
     id: document.querySelector("#contactId"),
     name: document.querySelector("#contactName"),
+    first_name: document.querySelector("#contactFirstName"),
+    last_name: document.querySelector("#contactLastName"),
     phone: document.querySelector("#contactPhone"),
+    phone_label: document.querySelector("#contactPhoneLabel"),
     whatsapp: document.querySelector("#contactWhatsapp"),
+    whatsapp_label: document.querySelector("#contactWhatsappLabel"),
     email: document.querySelector("#contactEmail"),
     company: document.querySelector("#contactCompany"),
     address: document.querySelector("#contactAddress"),
+    location_url: document.querySelector("#contactLocationUrl"),
+    birth_date: document.querySelector("#contactBirthDate"),
+    important_date: document.querySelector("#contactImportantDate"),
+    important_date_label: document.querySelector("#contactImportantDateLabel"),
+    related_name: document.querySelector("#contactRelatedName"),
+    social_profile: document.querySelector("#contactSocialProfile"),
     notes: document.querySelector("#contactNotes"),
   },
   scheduleFields: {
@@ -1233,10 +1244,36 @@ function renderClients() {
   `;
 }
 
+function contactSearchText(contact) {
+  return [
+    contact.name,
+    contact.first_name,
+    contact.last_name,
+    contact.company,
+    contact.phone,
+    contact.whatsapp,
+    contact.email,
+    contact.address,
+    contact.related_name,
+    contact.notes,
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function filteredContacts() {
+  const q = state.contactSearch.trim().toLowerCase();
+  if (!q) return state.contacts;
+  return state.contacts.filter((contact) => contactSearchText(contact).includes(q));
+}
+
+function contactDateMeta(label, value) {
+  return value ? `<span>${escapeHtml(label)}: ${formatDate(value)}</span>` : "";
+}
+
 function renderContacts() {
+  const contacts = filteredContacts();
   els.views.contacts.innerHTML = `
     <div class="panel">
-      <div class="panel-head">
+      <div class="panel-head contacts-head">
         <h3>Contacts / telephone diary</h3>
         <div class="inline-actions">
           <button class="secondary-button" data-action="sync-icloud-contacts">Sync iCloud</button>
@@ -1247,50 +1284,82 @@ function renderContacts() {
           <button class="primary-button" data-action="add-contact">Add contact</button>
         </div>
       </div>
+      <div class="contacts-toolbar">
+        <label class="search-wrap contact-search">
+          <span>Search</span>
+          <input data-action="contact-search" value="${escapeHtml(state.contactSearch)}" placeholder="Name, company, phone, email" />
+        </label>
+        <div class="task-meta">${contacts.length} of ${state.contacts.length} contact(s)</div>
+      </div>
       <div class="task-note">Sync imports iCloud or Google contacts into GPA. Push Google creates missing Google contacts from GPA; it does not delete phone contacts.</div>
-      <div class="client-grid">
-        ${state.contacts
-          .map(
-            (contact) => `
-              <article class="client-card">
-                <div class="task-row">
-                  <div>
-                    <button class="task-title" data-action="edit-contact" data-id="${contact.id}">${escapeHtml(contact.name)}</button>
-                    <div class="task-meta">${escapeHtml(contact.phone || "No phone")} - ${escapeHtml(contact.email || "No email")}</div>
-                    ${contact.company ? `<div class="task-meta">${escapeHtml(contact.company)}</div>` : ""}
+      <div class="contact-list">
+        ${contacts
+          .map((contact) => {
+            const phone = contact.phone || contact.whatsapp || "";
+            const phoneLabel = contact.phone ? contact.phone_label || "Mobile" : contact.whatsapp_label || "WhatsApp";
+            const dates = [
+              contactDateMeta("Birthday", contact.birth_date),
+              contactDateMeta(contact.important_date_label || "Other date", contact.important_date),
+            ].filter(Boolean).join(" ");
+            return `
+              <article class="contact-row">
+                <div class="contact-main">
+                  <button class="task-title contact-name" data-action="edit-contact" data-id="${contact.id}">${escapeHtml(contact.name)}</button>
+                  <div class="task-meta contact-meta">
+                    ${contact.company ? `<span>${escapeHtml(contact.company)}</span>` : ""}
+                    ${phone ? `<span>${escapeHtml(phoneLabel)}: ${escapeHtml(phone)}</span>` : ""}
+                    ${contact.email ? `<span>${escapeHtml(contact.email)}</span>` : ""}
+                    ${dates}
                   </div>
+                  ${(contact.address || contact.related_name || contact.social_profile || contact.location_url) ? `
+                    <div class="task-meta contact-meta subtle-line">
+                      ${contact.related_name ? `<span>Related: ${escapeHtml(contact.related_name)}</span>` : ""}
+                      ${contact.address ? `<span>${escapeHtml(contact.address)}</span>` : ""}
+                      ${contact.social_profile ? `<a href="${escapeHtml(contact.social_profile)}" target="_blank" rel="noreferrer">Profile</a>` : ""}
+                      ${contact.location_url ? `<a href="${escapeHtml(contact.location_url)}" target="_blank" rel="noreferrer">Location</a>` : ""}
+                    </div>` : ""}
                 </div>
-                ${contact.address ? `<div class="task-note">${escapeHtml(contact.address)}</div>` : ""}
-                ${contact.notes ? `<div class="task-note">${escapeHtml(contact.notes)}</div>` : ""}
-                <div class="inline-actions">
+                <div class="inline-actions contact-actions">
                   <button class="secondary-button link-button" data-action="contact-whatsapp" data-id="${contact.id}" type="button">WhatsApp</button>
                   <button class="secondary-button link-button" data-action="contact-sms" data-id="${contact.id}" type="button">SMS</button>
                   <button class="secondary-button" data-action="contact-to-client" data-id="${contact.id}" type="button">Make client</button>
                 </div>
               </article>
-            `
-          )
-          .join("") || renderTaskList([], "No contacts saved yet")}
+            `;
+          })
+          .join("") || renderTaskList([], state.contactSearch ? "No contacts match this search" : "No contacts saved yet")}
       </div>
     </div>
   `;
 }
 
 function contactPayload() {
+  const firstName = els.contactFields.first_name.value.trim();
+  const lastName = els.contactFields.last_name.value.trim();
+  const displayName = els.contactFields.name.value.trim() || [firstName, lastName].filter(Boolean).join(" ");
   return {
-    name: els.contactFields.name.value.trim(),
+    name: displayName,
+    first_name: firstName,
+    last_name: lastName,
     phone: phoneDigits(els.contactFields.phone.value),
+    phone_label: els.contactFields.phone_label.value.trim() || "Mobile",
     whatsapp: phoneDigits(els.contactFields.whatsapp.value),
+    whatsapp_label: els.contactFields.whatsapp_label.value.trim() || "WhatsApp",
     email: emailValue(els.contactFields.email.value),
     company: els.contactFields.company.value.trim(),
     address: els.contactFields.address.value.trim(),
+    location_url: els.contactFields.location_url.value.trim(),
+    birth_date: els.contactFields.birth_date.value || null,
+    important_date: els.contactFields.important_date.value || null,
+    important_date_label: els.contactFields.important_date_label.value.trim(),
+    related_name: els.contactFields.related_name.value.trim(),
+    social_profile: els.contactFields.social_profile.value.trim(),
     notes: els.contactFields.notes.value.trim(),
     active: true,
   };
 }
-
 function validateContactPayload(payload) {
-  if (!payload.name) return "Contact name is required.";
+  if (!payload.name) return "First name, last name, or display name is required.";
   if (payload.phone && !isTenDigitPhone(payload.phone)) return "Mobile must be exactly 10 digits.";
   if (payload.whatsapp && !isTenDigitPhone(payload.whatsapp)) return "WhatsApp must be exactly 10 digits.";
   if (!isValidEmail(payload.email)) return "Email must be valid.";
@@ -1302,7 +1371,7 @@ function openContactDialog(contact = null) {
   els.contactForm.reset();
   els.deleteContactBtn.hidden = !contact;
   els.contactDialogTitle.textContent = contact ? "Edit contact" : "Add contact";
-  const defaults = { id: "", name: "", phone: "", whatsapp: "", email: "", company: "", address: "", notes: "" };
+  const defaults = { id: "", name: "", first_name: "", last_name: "", phone: "", phone_label: "Mobile", whatsapp: "", whatsapp_label: "WhatsApp", email: "", company: "", address: "", location_url: "", birth_date: "", important_date: "", important_date_label: "", related_name: "", social_profile: "", notes: "" };
   const data = { ...defaults, ...(contact || {}) };
   Object.entries(els.contactFields).forEach(([key, field]) => {
     field.value = data[key] ?? "";
@@ -1345,7 +1414,12 @@ async function saveContactForm(event) {
 async function deleteContactFromDialog() {
   const id = els.contactFields.id.value;
   if (!id || !window.confirm("Delete this contact?")) return;
-  await api(`${API_CONTACTS_URL}/${id}`, { method: "DELETE" });
+  try {
+    await api(`${API_CONTACTS_URL}/${id}`, { method: "DELETE" });
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
   await loadContacts();
   await loadActivity();
   closeDialog(els.contactDialog, els.contactForm, { skipConfirm: true });
@@ -2202,11 +2276,21 @@ function parseCsvContacts(text) {
     const row = Object.fromEntries(headers.map((header, index) => [header, values[index] || ""]));
     return {
       name: row.name || row["full name"] || row.contact || "",
+      first_name: row["first name"] || row.firstname || "",
+      last_name: row["last name"] || row.lastname || "",
       phone: row.phone || row.mobile || row.telephone || "",
+      phone_label: row["phone tag"] || row["phone label"] || "Mobile",
       whatsapp: row.whatsapp || "",
+      whatsapp_label: row["whatsapp tag"] || row["whatsapp label"] || "WhatsApp",
       email: row.email || row.mail || "",
       company: row.company || row.organization || "",
       address: row.address || "",
+      location_url: row["location url"] || row.location || "",
+      birth_date: row.birthday || row["birth date"] || "",
+      important_date: row["other date"] || row["important date"] || "",
+      important_date_label: row["other date label"] || row["important date label"] || "",
+      related_name: row["related name"] || row.related || "",
+      social_profile: row["social profile"] || row.profile || "",
       notes: row.notes || row.note || "",
     };
   });
@@ -2222,21 +2306,26 @@ function parseVcfContacts(text) {
         const line = lines.find((item) => prefixes.some((prefix) => item.toUpperCase().startsWith(prefix)));
         return line ? line.slice(line.indexOf(":") + 1).replace(/\\n/g, " ").trim() : "";
       };
-      const name = valueFor(["FN"]) || valueFor(["N"]);
+      const nameParts = valueFor(["N"]).split(";");
+      const first_name = nameParts[1] || "";
+      const last_name = nameParts[0] || "";
+      const name = valueFor(["FN"]) || [first_name, last_name].filter(Boolean).join(" ");
       const phone = phoneDigits(valueFor(["TEL"]));
       const email = valueFor(["EMAIL"]).toLowerCase();
       const company = valueFor(["ORG"]);
       const address = valueFor(["ADR"]).replace(/;/g, " ").replace(/\s+/g, " ").trim();
+      const birth_date = valueFor(["BDAY"]);
+      const social_profile = valueFor(["X-SOCIALPROFILE", "URL"]);
       const notes = valueFor(["NOTE"]);
-      return { name, phone, whatsapp: "", email, company, address, notes };
+      return { name, first_name, last_name, phone, phone_label: "Mobile", whatsapp: "", whatsapp_label: "WhatsApp", email, company, address, birth_date, social_profile, notes };
     })
     .filter((contact) => contact.name);
 }
 
 function exportContactsCSV() {
-  const headers = ["Name", "Phone", "WhatsApp", "Email", "Company", "Address", "Notes"];
+  const headers = ["Name", "First Name", "Last Name", "Phone Tag", "Phone", "WhatsApp Tag", "WhatsApp", "Email", "Company", "Address", "Location URL", "Birthday", "Other Date Label", "Other Date", "Related Name", "Social Profile", "Notes"];
   const rows = state.contacts.map((contact) =>
-    [contact.name, contact.phone, contact.whatsapp, contact.email, contact.company, contact.address, contact.notes].map(csvCell).join(",")
+    [contact.name, contact.first_name, contact.last_name, contact.phone_label, contact.phone, contact.whatsapp_label, contact.whatsapp, contact.email, contact.company, contact.address, contact.location_url, contact.birth_date, contact.important_date_label, contact.important_date, contact.related_name, contact.social_profile, contact.notes].map(csvCell).join(",")
   );
   downloadTextFile(`gpa-v3-contacts-${todayISO()}.csv`, [headers.map(csvCell).join(","), ...rows].join("\n"), "text/csv;charset=utf-8");
 }
@@ -2483,6 +2572,18 @@ function bindEvents() {
   els.deleteContactBtn.addEventListener("click", deleteContactFromDialog);
   els.deleteScheduleBtn.addEventListener("click", deleteScheduleFromDialog);
   els.deleteMasterBtn.addEventListener("click", deleteMasterFromDialog);
+  document.body.addEventListener("input", (event) => {
+    const target = event.target.closest("[data-action=\"contact-search\"]");
+    if (!target) return;
+    state.contactSearch = target.value;
+    const cursor = target.selectionStart ?? state.contactSearch.length;
+    renderContacts();
+    const nextInput = els.views.contacts.querySelector("[data-action=\"contact-search\"]");
+    if (nextInput) {
+      nextInput.focus();
+      nextInput.setSelectionRange(cursor, cursor);
+    }
+  });
   document.body.addEventListener("click", (event) => {
     const target = event.target.closest("[data-action]");
     const closeButton = event.target.closest("[data-close-dialog]");

@@ -60,11 +60,21 @@ CLIENT_COLUMNS = {
 }
 
 CONTACT_COLUMNS = {
+    "first_name": "TEXT DEFAULT ''",
+    "last_name": "TEXT DEFAULT ''",
     "phone": "TEXT DEFAULT ''",
+    "phone_label": "TEXT DEFAULT 'Mobile'",
     "whatsapp": "TEXT DEFAULT ''",
+    "whatsapp_label": "TEXT DEFAULT 'WhatsApp'",
     "email": "TEXT DEFAULT ''",
     "company": "TEXT DEFAULT ''",
     "address": "TEXT DEFAULT ''",
+    "location_url": "TEXT DEFAULT ''",
+    "birth_date": "DATE",
+    "important_date": "DATE",
+    "important_date_label": "TEXT DEFAULT ''",
+    "related_name": "TEXT DEFAULT ''",
+    "social_profile": "TEXT DEFAULT ''",
     "notes": "TEXT DEFAULT ''",
     "google_resource_name": "TEXT DEFAULT ''",
     "google_etag": "TEXT DEFAULT ''",
@@ -160,11 +170,19 @@ def migrate_contact_table():
         for column, definition in CONTACT_COLUMNS.items():
             if column not in existing:
                 connection.execute(text(f"ALTER TABLE contacts ADD COLUMN {column} {definition}"))
+        connection.execute(text("UPDATE contacts SET first_name = '' WHERE first_name IS NULL"))
+        connection.execute(text("UPDATE contacts SET last_name = '' WHERE last_name IS NULL"))
         connection.execute(text("UPDATE contacts SET phone = '' WHERE phone IS NULL"))
+        connection.execute(text("UPDATE contacts SET phone_label = 'Mobile' WHERE phone_label IS NULL OR phone_label = ''"))
         connection.execute(text("UPDATE contacts SET whatsapp = '' WHERE whatsapp IS NULL"))
+        connection.execute(text("UPDATE contacts SET whatsapp_label = 'WhatsApp' WHERE whatsapp_label IS NULL OR whatsapp_label = ''"))
         connection.execute(text("UPDATE contacts SET email = '' WHERE email IS NULL"))
         connection.execute(text("UPDATE contacts SET company = '' WHERE company IS NULL"))
         connection.execute(text("UPDATE contacts SET address = '' WHERE address IS NULL"))
+        connection.execute(text("UPDATE contacts SET location_url = '' WHERE location_url IS NULL"))
+        connection.execute(text("UPDATE contacts SET important_date_label = '' WHERE important_date_label IS NULL"))
+        connection.execute(text("UPDATE contacts SET related_name = '' WHERE related_name IS NULL"))
+        connection.execute(text("UPDATE contacts SET social_profile = '' WHERE social_profile IS NULL"))
         connection.execute(text("UPDATE contacts SET notes = '' WHERE notes IS NULL"))
         connection.execute(text("UPDATE contacts SET google_resource_name = '' WHERE google_resource_name IS NULL"))
         connection.execute(text("UPDATE contacts SET google_etag = '' WHERE google_etag IS NULL"))

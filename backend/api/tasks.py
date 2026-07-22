@@ -84,12 +84,22 @@ class ClientUpdate(ClientBase):
 
 
 class ContactBase(BaseModel):
-    name: str = Field(min_length=1, max_length=200)
+    name: str = Field(default="", max_length=200)
+    first_name: str = Field(default="", max_length=120)
+    last_name: str = Field(default="", max_length=120)
     phone: str = ""
+    phone_label: str = Field(default="Mobile", max_length=40)
     whatsapp: str = ""
+    whatsapp_label: str = Field(default="WhatsApp", max_length=40)
     email: str = ""
     company: str = ""
     address: str = ""
+    location_url: str = ""
+    birth_date: date | None = None
+    important_date: date | None = None
+    important_date_label: str = Field(default="", max_length=80)
+    related_name: str = Field(default="", max_length=200)
+    social_profile: str = ""
     notes: str = ""
     active: bool = True
 
@@ -472,17 +482,39 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Ses
     return data
 
 
+def normalize_url(value: str, label: str) -> str:
+    clean = (value or "").strip()
+    if not clean:
+        return ""
+    if not fullmatch(r"https?://[^\s]+", clean):
+        raise HTTPException(status_code=400, detail=f"{label} must start with http:// or https://")
+    return clean
+
+
+def contact_display_name(data: dict) -> str:
+    first_name = " ".join((data.get("first_name") or "").split())
+    last_name = " ".join((data.get("last_name") or "").split())
+    display_name = " ".join((data.get("name") or "").split())
+    return display_name or " ".join(part for part in [first_name, last_name] if part).strip()
+
+
 def normalize_contact_data(contact_data: ContactCreate | ContactUpdate) -> dict:
     data = contact_data.model_dump()
     for key, value in data.items():
         if isinstance(value, str):
             data[key] = value.strip()
-    data["name"] = " ".join(data["name"].split())
+    data["first_name"] = " ".join(data["first_name"].split())
+    data["last_name"] = " ".join(data["last_name"].split())
+    data["name"] = contact_display_name(data)
     if not data["name"]:
-        raise HTTPException(status_code=400, detail="Contact name is required")
-    data["phone"] = normalize_optional_phone_number(data["phone"], "Mobile")
-    data["whatsapp"] = normalize_optional_phone_number(data["whatsapp"], "WhatsApp")
+        raise HTTPException(status_code=400, detail="Contact first name, last name, or display name is required")
+    data["phone_label"] = data["phone_label"] or "Mobile"
+    data["whatsapp_label"] = data["whatsapp_label"] or "WhatsApp"
+    data["phone"] = normalize_optional_phone_number(data["phone"], data["phone_label"])
+    data["whatsapp"] = normalize_optional_phone_number(data["whatsapp"], data["whatsapp_label"])
     data["email"] = normalize_email(data["email"])
+    data["location_url"] = normalize_url(data["location_url"], "Location URL")
+    data["social_profile"] = normalize_url(data["social_profile"], "Social profile")
     return data
 
 
@@ -1078,6 +1110,15 @@ def delete_contact(contact_id: int, session: Session = Depends(get_session)):
     contact = session.get(Contact, contact_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
+    linked_client = find_duplicate_by_name(session, Client, contact.name)
+    if not linked_client:
+        linked_client = find_duplicate_by_any_field(session, Client, ["phone", "whatsapp"], contact.phone or contact.whatsapp)
+    if not linked_client and contact.email:
+        linked_client = find_duplicate_by_any_field(session, Client, ["email"], contact.email)
+    if linked_client:
+        linked_tasks = session.exec(select(Task).where(Task.client_id == linked_client.id)).all()
+        if linked_tasks:
+            raise HTTPException(status_code=400, detail=f"Cannot delete this contact because {len(linked_tasks)} task(s) are linked through client {linked_client.name}.")
     contact.active = False
     contact.updated_at = now()
     session.add(contact)

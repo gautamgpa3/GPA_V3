@@ -1,6 +1,6 @@
 import base64
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from os import getenv
 from pathlib import Path
 from re import sub
@@ -33,11 +33,21 @@ class ICloudCredentials:
 @dataclass
 class ParsedContact:
     name: str
+    first_name: str = ""
+    last_name: str = ""
     phone: str = ""
+    phone_label: str = "Mobile"
     whatsapp: str = ""
+    whatsapp_label: str = "WhatsApp"
     email: str = ""
     company: str = ""
     address: str = ""
+    location_url: str = ""
+    birth_date: date | None = None
+    important_date: date | None = None
+    important_date_label: str = ""
+    related_name: str = ""
+    social_profile: str = ""
     notes: str = ""
 
 
@@ -222,6 +232,41 @@ def vcard_value(lines: Iterable[str], names: tuple[str, ...]) -> str:
     return ""
 
 
+def vcard_line(lines: Iterable[str], names: tuple[str, ...]) -> str:
+    for line in lines:
+        key, _, _ = line.partition(":")
+        key_name = key.split(";", 1)[0].upper()
+        if key_name in names:
+            return line
+    return ""
+
+
+def vcard_label(line: str, fallback: str) -> str:
+    key = line.partition(":")[0]
+    parts = key.split(";")[1:]
+    for part in parts:
+        upper = part.upper()
+        if upper.startswith("TYPE="):
+            return part.split("=", 1)[1].split(",", 1)[0].title()
+        if upper in {"HOME", "WORK", "MOBILE", "CELL", "MAIN", "OTHER"}:
+            return "Mobile" if upper == "CELL" else upper.title()
+    return fallback
+
+
+def vcard_date(value: str) -> date | None:
+    clean = sub(r"[^0-9]", "", value or "")
+    if len(clean) == 8:
+        year, month, day = int(clean[:4]), int(clean[4:6]), int(clean[6:8])
+    elif len(clean) == 4:
+        year, month, day = 1900, int(clean[:2]), int(clean[2:4])
+    else:
+        return None
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
 def normalize_indian_phone(value: str) -> str:
     digits = sub(r"\D", "", value or "")
     if len(digits) == 12 and digits.startswith("91"):
@@ -234,17 +279,35 @@ def normalize_indian_phone(value: str) -> str:
 def parse_vcard(vcard: str) -> ParsedContact | None:
     lines = unfold_vcard_lines(vcard)
     name = vcard_value(lines, ("FN",))
+    name_fields = vcard_value(lines, ("N",)).split(";")
+    last_name = clean_vcard_value(name_fields[0]) if len(name_fields) > 0 else ""
+    first_name = clean_vcard_value(name_fields[1]) if len(name_fields) > 1 else ""
     if not name:
-        name_parts = [part for part in vcard_value(lines, ("N",)).split(";") if part.strip()]
-        name = " ".join(reversed(name_parts[:2])).strip()
-    phone = normalize_indian_phone(vcard_value(lines, ("TEL",)))
+        name = " ".join(part for part in [first_name, last_name] if part).strip()
+    tel_line = vcard_line(lines, ("TEL",))
+    phone = normalize_indian_phone(tel_line.partition(":")[2] if tel_line else "")
     email = vcard_value(lines, ("EMAIL",)).lower()
     company = vcard_value(lines, ("ORG",))
     address = " ".join(part for part in vcard_value(lines, ("ADR",)).replace(";", " ").split() if part)
     notes = vcard_value(lines, ("NOTE",))
+    social_profile = vcard_value(lines, ("X-SOCIALPROFILE", "URL"))
+    birth_date = vcard_date(vcard_value(lines, ("BDAY", "BIRTHDAY")))
     if not name or (not phone and not email):
         return None
-    return ParsedContact(name=name, phone=phone, email=email, company=company, address=address, notes=notes)
+    return ParsedContact(
+        name=name,
+        first_name=first_name,
+        last_name=last_name,
+        phone=phone,
+        phone_label=vcard_label(tel_line, "Mobile"),
+        whatsapp=phone,
+        email=email,
+        company=company,
+        address=address,
+        birth_date=birth_date,
+        social_profile=social_profile,
+        notes=notes,
+    )
 
 
 def contact_conflict(session: Session, contact: ParsedContact, exclude_id: int | None = None) -> Contact | None:
@@ -271,11 +334,21 @@ def upsert_contacts(session: Session, contacts: list[ParsedContact], dry_run: bo
                 skipped += 1
                 continue
             if not dry_run:
+                existing.first_name = item.first_name or existing.first_name
+                existing.last_name = item.last_name or existing.last_name
                 existing.phone = item.phone or existing.phone
+                existing.phone_label = item.phone_label or existing.phone_label
                 existing.whatsapp = existing.whatsapp or item.phone
+                existing.whatsapp_label = existing.whatsapp_label or item.whatsapp_label
                 existing.email = item.email or existing.email
                 existing.company = item.company or existing.company
                 existing.address = item.address or existing.address
+                existing.location_url = item.location_url or existing.location_url
+                existing.birth_date = item.birth_date or existing.birth_date
+                existing.important_date = item.important_date or existing.important_date
+                existing.important_date_label = item.important_date_label or existing.important_date_label
+                existing.related_name = item.related_name or existing.related_name
+                existing.social_profile = item.social_profile or existing.social_profile
                 existing.notes = item.notes or existing.notes
                 existing.active = True
                 existing.updated_at = datetime.now()
@@ -289,11 +362,21 @@ def upsert_contacts(session: Session, contacts: list[ParsedContact], dry_run: bo
             session.add(
                 Contact(
                     name=item.name,
+                    first_name=item.first_name,
+                    last_name=item.last_name,
                     phone=item.phone,
+                    phone_label=item.phone_label,
                     whatsapp=item.phone,
+                    whatsapp_label=item.whatsapp_label,
                     email=item.email,
                     company=item.company,
                     address=item.address,
+                    location_url=item.location_url,
+                    birth_date=item.birth_date,
+                    important_date=item.important_date,
+                    important_date_label=item.important_date_label,
+                    related_name=item.related_name,
+                    social_profile=item.social_profile,
                     notes=item.notes,
                     updated_at=datetime.now(),
                 )

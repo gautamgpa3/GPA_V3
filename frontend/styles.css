@@ -900,6 +900,85 @@ button {
   text-transform: uppercase;
 }
 
+
+.contacts-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  margin: 12px 0;
+}
+
+.contact-search {
+  width: min(520px, 100%);
+}
+
+.contact-search span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.contact-list {
+  display: grid;
+  gap: 8px;
+}
+
+.contact-row {
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 58px;
+  padding: 9px 12px;
+}
+
+.contact-main {
+  min-width: 0;
+}
+
+.contact-name {
+  display: inline-block;
+  font-size: 15px;
+  margin-bottom: 3px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
+.contact-meta a {
+  color: #ffffff;
+  font-weight: 800;
+}
+
+.subtle-line {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.contact-actions {
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.contact-actions .secondary-button {
+  margin-bottom: 0;
+  min-height: 34px;
+  padding: 0 10px;
+}
 .client-card {
   background: var(--card);
   border: 1px solid var(--line);
@@ -1223,6 +1302,20 @@ textarea {
 
   .client-grid {
     grid-template-columns: 1fr;
+  }
+
+  .contacts-toolbar,
+  .contact-row {
+    align-items: stretch;
+    grid-template-columns: 1fr;
+  }
+
+  .contacts-toolbar {
+    flex-direction: column;
+  }
+
+  .contact-actions {
+    justify-content: flex-start;
   }
 
   .briefing-list {

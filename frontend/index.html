@@ -280,12 +280,44 @@
         <input type="hidden" id="contactId" />
         <div class="form-grid">
           <label>
-            <span>Name</span>
-            <input id="contactName" required maxlength="200" />
+            <span>First name</span>
+            <input id="contactFirstName" maxlength="120" autocomplete="given-name" />
           </label>
           <label>
-            <span>Mobile</span>
+            <span>Last name</span>
+            <input id="contactLastName" maxlength="120" autocomplete="family-name" />
+          </label>
+          <label>
+            <span>Display name</span>
+            <input id="contactName" maxlength="200" autocomplete="name" placeholder="Auto from first and last" />
+          </label>
+          <label>
+            <span>Company</span>
+            <input id="contactCompany" maxlength="200" autocomplete="organization" />
+          </label>
+          <label>
+            <span>Phone tag</span>
+            <select id="contactPhoneLabel">
+              <option>Mobile</option>
+              <option>Home</option>
+              <option>Work</option>
+              <option>Main</option>
+              <option>Other</option>
+            </select>
+          </label>
+          <label>
+            <span>Phone</span>
             <input id="contactPhone" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
+          </label>
+          <label>
+            <span>WhatsApp tag</span>
+            <select id="contactWhatsappLabel">
+              <option>WhatsApp</option>
+              <option>Mobile</option>
+              <option>Home</option>
+              <option>Work</option>
+              <option>Other</option>
+            </select>
           </label>
           <label>
             <span>WhatsApp</span>
@@ -293,19 +325,39 @@
           </label>
           <label>
             <span>Email</span>
-            <input id="contactEmail" type="email" maxlength="200" />
+            <input id="contactEmail" type="email" maxlength="200" autocomplete="email" />
           </label>
           <label>
-            <span>Company / tag</span>
-            <input id="contactCompany" maxlength="200" />
+            <span>Birthday</span>
+            <input id="contactBirthDate" type="date" />
+          </label>
+          <label>
+            <span>Other date label</span>
+            <input id="contactImportantDateLabel" maxlength="80" placeholder="Anniversary, renewal" />
+          </label>
+          <label>
+            <span>Other date</span>
+            <input id="contactImportantDate" type="date" />
+          </label>
+          <label>
+            <span>Related name</span>
+            <input id="contactRelatedName" maxlength="200" />
+          </label>
+          <label>
+            <span>Social profile</span>
+            <input id="contactSocialProfile" type="url" maxlength="500" placeholder="https://" />
+          </label>
+          <label class="full">
+            <span>Location URL</span>
+            <input id="contactLocationUrl" type="url" maxlength="500" placeholder="https://maps.google.com/..." />
           </label>
           <label class="full">
             <span>Address</span>
-            <textarea id="contactAddress" rows="3"></textarea>
+            <textarea id="contactAddress" rows="2"></textarea>
           </label>
           <label class="full">
             <span>Notes</span>
-            <textarea id="contactNotes" rows="3"></textarea>
+            <textarea id="contactNotes" rows="2"></textarea>
           </label>
         </div>
         <div class="dialog-actions">

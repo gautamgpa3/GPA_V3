@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from os import getenv
 from pathlib import Path
 from re import sub
@@ -18,7 +18,7 @@ DEFAULT_SYNC_FILE = "/opt/gpa-v3/secrets/google_contacts.env"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 PEOPLE_CONNECTIONS_URL = "https://people.googleapis.com/v1/people/me/connections"
 PEOPLE_CREATE_CONTACT_URL = "https://people.googleapis.com/v1/people:createContact"
-PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,biographies,metadata"
+PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,biographies,birthdays,events,relations,urls,metadata"
 
 
 @dataclass
@@ -31,11 +31,21 @@ class GoogleCredentials:
 @dataclass
 class ParsedGoogleContact:
     name: str
+    first_name: str = ""
+    last_name: str = ""
     phone: str = ""
+    phone_label: str = "Mobile"
     whatsapp: str = ""
+    whatsapp_label: str = "WhatsApp"
     email: str = ""
     company: str = ""
     address: str = ""
+    location_url: str = ""
+    birth_date: date | None = None
+    important_date: date | None = None
+    important_date_label: str = ""
+    related_name: str = ""
+    social_profile: str = ""
     notes: str = ""
     google_resource_name: str = ""
     google_etag: str = ""
@@ -130,31 +140,58 @@ def normalize_indian_phone(value: str) -> str:
     return digits if len(digits) == 10 else ""
 
 
+def google_date(value: dict | None) -> date | None:
+    if not value or not value.get("month") or not value.get("day"):
+        return None
+    year = int(value.get("year") or 1900)
+    try:
+        return date(year, int(value["month"]), int(value["day"]))
+    except ValueError:
+        return None
+
+
+def google_label(items: list[dict] | None, fallback: str) -> str:
+    if not items:
+        return fallback
+    return str(items[0].get("formattedType") or items[0].get("type") or fallback).strip() or fallback
+
+
 def parse_google_person(person: dict) -> ParsedGoogleContact | None:
     names = person.get("names") or []
     primary_name = names[0] if names else {}
+    first_name = str(primary_name.get("givenName") or "").strip()
+    last_name = str(primary_name.get("familyName") or "").strip()
     name = str(primary_name.get("displayName") or "").strip()
     if not name:
-        name = " ".join(
-            part
-            for part in (primary_name.get("givenName"), primary_name.get("familyName"))
-            if part
-        ).strip()
+        name = " ".join(part for part in (first_name, last_name) if part).strip()
     phones = person.get("phoneNumbers") or []
     phone = normalize_indian_phone(first_value(phones, "canonicalForm") or first_value(phones, "value"))
     email = first_value(person.get("emailAddresses"), "value").lower()
     company = first_value(person.get("organizations"), "name")
     address = first_value(person.get("addresses"), "formattedValue")
     notes = first_value(person.get("biographies"), "value")
+    urls = person.get("urls") or []
+    birthdays = person.get("birthdays") or []
+    events = person.get("events") or []
+    relations = person.get("relations") or []
     if not name or (not phone and not email):
         return None
     return ParsedGoogleContact(
         name=name,
+        first_name=first_name,
+        last_name=last_name,
         phone=phone,
+        phone_label=google_label(phones, "Mobile"),
         whatsapp=phone,
+        whatsapp_label="WhatsApp",
         email=email,
         company=company,
         address=address,
+        birth_date=google_date((birthdays[0] if birthdays else {}).get("date")),
+        important_date=google_date((events[0] if events else {}).get("date")),
+        important_date_label=google_label(events, "Other date") if events else "",
+        related_name=first_value(relations, "person"),
+        social_profile=first_value(urls, "value"),
         notes=notes,
         google_resource_name=str(person.get("resourceName") or "").strip(),
         google_etag=str(person.get("etag") or "").strip(),
@@ -216,11 +253,21 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
                 skipped += 1
                 continue
             if not dry_run:
+                existing.first_name = item.first_name or existing.first_name
+                existing.last_name = item.last_name or existing.last_name
                 existing.phone = item.phone or existing.phone
+                existing.phone_label = item.phone_label or existing.phone_label
                 existing.whatsapp = existing.whatsapp or item.whatsapp or item.phone
+                existing.whatsapp_label = existing.whatsapp_label or item.whatsapp_label
                 existing.email = item.email or existing.email
                 existing.company = item.company or existing.company
                 existing.address = item.address or existing.address
+                existing.location_url = item.location_url or existing.location_url
+                existing.birth_date = item.birth_date or existing.birth_date
+                existing.important_date = item.important_date or existing.important_date
+                existing.important_date_label = item.important_date_label or existing.important_date_label
+                existing.related_name = item.related_name or existing.related_name
+                existing.social_profile = item.social_profile or existing.social_profile
                 existing.notes = item.notes or existing.notes
                 existing.google_resource_name = item.google_resource_name or existing.google_resource_name
                 existing.google_etag = item.google_etag or existing.google_etag
@@ -236,11 +283,21 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
             session.add(
                 Contact(
                     name=item.name,
+                    first_name=item.first_name,
+                    last_name=item.last_name,
                     phone=item.phone,
+                    phone_label=item.phone_label,
                     whatsapp=item.whatsapp or item.phone,
+                    whatsapp_label=item.whatsapp_label,
                     email=item.email,
                     company=item.company,
                     address=item.address,
+                    location_url=item.location_url,
+                    birth_date=item.birth_date,
+                    important_date=item.important_date,
+                    important_date_label=item.important_date_label,
+                    related_name=item.related_name,
+                    social_profile=item.social_profile,
                     notes=item.notes,
                     google_resource_name=item.google_resource_name,
                     google_etag=item.google_etag,
@@ -261,21 +318,44 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
     return {"success": True, "created": created, "updated": updated, "skipped": skipped, "total": len(contacts), "dry_run": dry_run}
 
 
+def google_person_date(value: date | None) -> dict | None:
+    if not value:
+        return None
+    body = {"month": value.month, "day": value.day}
+    if value.year != 1900:
+        body["year"] = value.year
+    return {"date": body}
+
+
 def build_google_person(contact: Contact) -> dict:
     name_parts = contact.name.split()
-    name = {"givenName": name_parts[0] if name_parts else contact.name}
-    if len(name_parts) > 1:
-        name["familyName"] = " ".join(name_parts[1:])
+    name = {"givenName": contact.first_name or (name_parts[0] if name_parts else contact.name)}
+    family_name = contact.last_name or (" ".join(name_parts[1:]) if len(name_parts) > 1 else "")
+    if family_name:
+        name["familyName"] = family_name
     person: dict[str, list[dict]] = {"names": [name]}
     phone = contact.whatsapp or contact.phone
     if phone:
-        person["phoneNumbers"] = [{"value": f"+91 {phone}"}]
+        person["phoneNumbers"] = [{"value": f"+91 {phone}", "type": (contact.phone_label or "mobile").lower()}]
     if contact.email:
         person["emailAddresses"] = [{"value": contact.email}]
     if contact.company:
         person["organizations"] = [{"name": contact.company}]
     if contact.address:
         person["addresses"] = [{"formattedValue": contact.address}]
+    if contact.birth_date:
+        person["birthdays"] = [google_person_date(contact.birth_date)]
+    if contact.important_date:
+        person["events"] = [{**google_person_date(contact.important_date), "type": "other"}]
+    if contact.related_name:
+        person["relations"] = [{"person": contact.related_name, "type": "other"}]
+    urls = []
+    if contact.social_profile:
+        urls.append({"value": contact.social_profile, "type": "profile"})
+    if contact.location_url:
+        urls.append({"value": contact.location_url, "type": "home"})
+    if urls:
+        person["urls"] = urls
     if contact.notes:
         person["biographies"] = [{"value": contact.notes, "contentType": "TEXT_PLAIN"}]
     return person
