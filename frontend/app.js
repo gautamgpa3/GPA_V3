@@ -971,6 +971,90 @@ function clientTaskNotes(clientId) {
   );
 }
 
+function dateTemplateValue(value) {
+  return value ? formatDate(value) : "";
+}
+
+function emptyTemplateValues(variables) {
+  return Object.fromEntries(variables.map(([name]) => [name, ""]));
+}
+
+function clientTemplateValues(client = {}) {
+  return {
+    client_name: client.name || "",
+    client_category: client.category || "",
+    client_phone: client.phone || "",
+    client_whatsapp: client.whatsapp || "",
+    client_email: client.email || "",
+    client_address: client.address || "",
+    client_gst_no: client.gst_no || "",
+    client_work_scope: client.work_scope || "",
+    client_birth_date: dateTemplateValue(client.birth_date),
+    client_notes: client.notes || "",
+    birth_date: dateTemplateValue(client.birth_date),
+    work_scope: client.work_scope || "",
+  };
+}
+
+function contactForClient(client) {
+  if (!client) return null;
+  const clientName = (client.name || "").trim().toLowerCase();
+  const clientEmail = (client.email || "").trim().toLowerCase();
+  const clientNumbers = [client.phone, client.whatsapp].map(phoneDigits).filter(Boolean);
+  return (state.contacts || []).find((contact) => {
+    const contactNumbers = [contact.phone, contact.whatsapp].map(phoneDigits).filter(Boolean);
+    return (
+      (clientName && (contact.name || "").trim().toLowerCase() === clientName) ||
+      (clientEmail && (contact.email || "").trim().toLowerCase() === clientEmail) ||
+      contactNumbers.some((number) => clientNumbers.includes(number))
+    );
+  }) || null;
+}
+
+function contactTemplateValues(contact = null) {
+  return {
+    ...emptyTemplateValues(CONTACT_TEMPLATE_VARIABLES),
+    contact_name: contact?.name || "",
+    contact_first_name: contact?.first_name || "",
+    contact_last_name: contact?.last_name || "",
+    contact_phone: contact?.phone || "",
+    contact_phone_label: contact?.phone_label || "",
+    contact_whatsapp: contact?.whatsapp || "",
+    contact_email: contact?.email || "",
+    contact_company: contact?.company || "",
+    contact_address: contact?.address || "",
+    contact_location_url: contact?.location_url || "",
+    contact_birth_date: dateTemplateValue(contact?.birth_date),
+    contact_important_date: dateTemplateValue(contact?.important_date),
+    contact_important_date_label: contact?.important_date_label || "",
+    contact_related_name: contact?.related_name || "",
+    contact_social_profile: contact?.social_profile || "",
+    contact_notes: contact?.notes || "",
+  };
+}
+
+function taskTemplateValues(task = {}) {
+  return {
+    task_title: task.title || "",
+    task_description: task.description || "",
+    task_category: task.category || "",
+    task_priority: task.priority || "",
+    task_status: task.status || "",
+    task_time: task.task_time || "",
+    task_topic: task.topic || "",
+    task_start_date: dateTemplateValue(task.start_date),
+    task_due_date: dateTemplateValue(task.due_date),
+    task_repeat_type: task.repeat_type || "",
+    task_repeat_every: task.repeat_every || "",
+    task_owner: task.owner || "",
+    task_issue: task.issue || "",
+    task_notes: task.notes || "",
+    due_date: dateTemplateValue(task.due_date),
+    notes: task.notes || "",
+    block: task.issue || "",
+  };
+}
+
 function clientMessage(client, type) {
   let messageContent = client.work_scope || "your pending work";
 
@@ -993,7 +1077,9 @@ function clientMessage(client, type) {
     state.messageTemplates.find((item) => item.key === `client_${type}`)?.body ||
     "Hello {client_name}, please submit required documents for {work_scope}.";
   return renderMessageTemplate(template, {
-    client_name: client.name,
+    ...clientTemplateValues(client),
+    ...contactTemplateValues(contactForClient(client)),
+    message_content: messageContent,
     work_scope: messageContent,
     notes: messageContent,
     block: messageContent,
@@ -1080,13 +1166,10 @@ function taskStageMessage(task, stage, previousTask = null) {
   return {
     client,
     message: renderMessageTemplate(template, {
-      client_name: client.name,
-      task_title: task.title,
-      task_status: task.status,
+      ...clientTemplateValues(client),
+      ...contactTemplateValues(contactForClient(client)),
+      ...taskTemplateValues(task),
       update_details: taskUpdateDetails(previousTask, task),
-      notes: task.notes || "",
-      block: task.issue || "",
-      due_date: formatDate(task.due_date),
     }),
   };
 }
@@ -1515,49 +1598,112 @@ function masterTypeLabel(type) {
   }[type] || "item";
 }
 
+const CLIENT_TEMPLATE_VARIABLES = [
+  ["client_name", "Client name"],
+  ["client_category", "Client category"],
+  ["client_phone", "Client phone"],
+  ["client_whatsapp", "Client WhatsApp"],
+  ["client_email", "Client email"],
+  ["client_address", "Client address"],
+  ["client_gst_no", "Client GST number"],
+  ["client_work_scope", "Client work scope"],
+  ["client_birth_date", "Client birth date"],
+  ["client_notes", "Client notes"],
+];
+
+const CONTACT_TEMPLATE_VARIABLES = [
+  ["contact_name", "Contact name"],
+  ["contact_first_name", "Contact first name"],
+  ["contact_last_name", "Contact last name"],
+  ["contact_phone", "Contact phone"],
+  ["contact_phone_label", "Contact phone label"],
+  ["contact_whatsapp", "Contact WhatsApp"],
+  ["contact_email", "Contact email"],
+  ["contact_company", "Contact company"],
+  ["contact_address", "Contact address"],
+  ["contact_location_url", "Contact location URL"],
+  ["contact_birth_date", "Contact birth date"],
+  ["contact_important_date", "Contact other date"],
+  ["contact_important_date_label", "Contact other date label"],
+  ["contact_related_name", "Contact related name"],
+  ["contact_social_profile", "Contact social profile"],
+  ["contact_notes", "Contact notes"],
+];
+
+const TASK_TEMPLATE_VARIABLES = [
+  ["task_title", "Task title"],
+  ["task_description", "Task description"],
+  ["task_category", "Task category"],
+  ["task_priority", "Task priority"],
+  ["task_status", "Task status"],
+  ["task_time", "Task time"],
+  ["task_topic", "Task topic"],
+  ["task_start_date", "Task start date"],
+  ["task_due_date", "Task due date"],
+  ["task_repeat_type", "Task repeat type"],
+  ["task_repeat_every", "Task repeat every"],
+  ["task_owner", "Task owner"],
+  ["task_issue", "Task block / issue"],
+  ["task_notes", "Task notes"],
+];
+
+const MESSAGE_CONTENT_TEMPLATE_VARIABLES = [
+  ["message_content", "Selected message content"],
+  ["work_scope", "General message content"],
+  ["notes", "Task notes message content"],
+  ["block", "Block message content"],
+];
+
+const TASK_STAGE_TEMPLATE_VARIABLES = [
+  ["update_details", "Changed task details"],
+  ["due_date", "Task due date"],
+];
+
+const BIRTHDAY_TEMPLATE_VARIABLES = [
+  ["birth_date", "Client birth date"],
+];
+
+const TELEGRAM_TEMPLATE_VARIABLES = [
+  ["pending_count", "Pending task count"],
+  ["pending_tasks", "Pending task list"],
+  ["due_today_count", "Due today count"],
+  ["overdue_count", "Overdue count"],
+  ["meeting_count", "Meeting count"],
+  ["bni_tomorrow_count", "BNI tomorrow count"],
+];
+
+function uniqueTemplateVariables(groups) {
+  const seen = new Set();
+  return groups.flat().filter(([name]) => {
+    if (seen.has(name)) return false;
+    seen.add(name);
+    return true;
+  });
+}
+
+const CLIENT_MESSAGE_TEMPLATE_VARIABLES = uniqueTemplateVariables([
+  CLIENT_TEMPLATE_VARIABLES,
+  CONTACT_TEMPLATE_VARIABLES,
+  MESSAGE_CONTENT_TEMPLATE_VARIABLES,
+]);
+
+const TASK_MESSAGE_TEMPLATE_VARIABLES = uniqueTemplateVariables([
+  CLIENT_TEMPLATE_VARIABLES,
+  CONTACT_TEMPLATE_VARIABLES,
+  TASK_TEMPLATE_VARIABLES,
+  TASK_STAGE_TEMPLATE_VARIABLES,
+  MESSAGE_CONTENT_TEMPLATE_VARIABLES,
+]);
+
 const TEMPLATE_VARIABLES = {
-  client_general: [
-    ["client_name", "Client name"],
-    ["work_scope", "Work scope"],
-  ],
-  client_notes: [
-    ["client_name", "Client name"],
-    ["notes", "Active task notes"],
-  ],
-  client_block: [
-    ["client_name", "Client name"],
-    ["block", "Block / issue text"],
-  ],
-  task_created: [
-    ["client_name", "Client name"],
-    ["task_title", "Task title"],
-    ["due_date", "Due date"],
-  ],
-  task_updated: [
-    ["client_name", "Client name"],
-    ["task_title", "Task title"],
-    ["update_details", "Changed details"],
-    ["notes", "Task notes"],
-    ["block", "Task block / issue"],
-    ["due_date", "Due date"],
-  ],
-  task_completed: [
-    ["client_name", "Client name"],
-    ["task_title", "Task title"],
-    ["due_date", "Due date"],
-  ],
-  client_birthday: [
-    ["client_name", "Client name"],
-    ["birth_date", "Birth date"],
-  ],
-  telegram_daily: [
-    ["pending_count", "Pending tasks"],
-    ["pending_tasks", "Pending task list"],
-    ["due_today_count", "Due today"],
-    ["overdue_count", "Overdue"],
-    ["meeting_count", "Meetings"],
-    ["bni_tomorrow_count", "BNI tomorrow"],
-  ],
+  client_general: CLIENT_MESSAGE_TEMPLATE_VARIABLES,
+  client_notes: CLIENT_MESSAGE_TEMPLATE_VARIABLES,
+  client_block: CLIENT_MESSAGE_TEMPLATE_VARIABLES,
+  task_created: TASK_MESSAGE_TEMPLATE_VARIABLES,
+  task_updated: TASK_MESSAGE_TEMPLATE_VARIABLES,
+  task_completed: TASK_MESSAGE_TEMPLATE_VARIABLES,
+  client_birthday: uniqueTemplateVariables([CLIENT_TEMPLATE_VARIABLES, CONTACT_TEMPLATE_VARIABLES, BIRTHDAY_TEMPLATE_VARIABLES]),
+  telegram_daily: TELEGRAM_TEMPLATE_VARIABLES,
 };
 
 function templateVariableButtons(templateKey) {

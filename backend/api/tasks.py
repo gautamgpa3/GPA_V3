@@ -561,6 +561,102 @@ def message_template_body(session: Session, key: str, fallback: str) -> str:
     return template.body if template else fallback
 
 
+def template_date(value: date | datetime | None) -> str:
+    if not value:
+        return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    return value.isoformat()
+
+
+def client_template_values(client: Client) -> dict[str, object]:
+    return {
+        "client_name": client.name,
+        "client_category": client.category,
+        "client_phone": client.phone,
+        "client_whatsapp": client.whatsapp,
+        "client_email": client.email,
+        "client_address": client.address,
+        "client_gst_no": client.gst_no,
+        "client_work_scope": client.work_scope,
+        "client_birth_date": template_date(client.birth_date),
+        "client_notes": client.notes,
+        "birth_date": template_date(client.birth_date),
+    }
+
+
+def empty_contact_template_values() -> dict[str, object]:
+    return {
+        "contact_name": "",
+        "contact_first_name": "",
+        "contact_last_name": "",
+        "contact_phone": "",
+        "contact_phone_label": "",
+        "contact_whatsapp": "",
+        "contact_email": "",
+        "contact_company": "",
+        "contact_address": "",
+        "contact_location_url": "",
+        "contact_birth_date": "",
+        "contact_important_date": "",
+        "contact_important_date_label": "",
+        "contact_related_name": "",
+        "contact_social_profile": "",
+        "contact_notes": "",
+    }
+
+
+def contact_template_values(contact: Contact | None) -> dict[str, object]:
+    values = empty_contact_template_values()
+    if not contact:
+        return values
+    values.update(
+        {
+            "contact_name": contact.name,
+            "contact_first_name": contact.first_name,
+            "contact_last_name": contact.last_name,
+            "contact_phone": contact.phone,
+            "contact_phone_label": contact.phone_label,
+            "contact_whatsapp": contact.whatsapp,
+            "contact_email": contact.email,
+            "contact_company": contact.company,
+            "contact_address": contact.address,
+            "contact_location_url": contact.location_url,
+            "contact_birth_date": template_date(contact.birth_date),
+            "contact_important_date": template_date(contact.important_date),
+            "contact_important_date_label": contact.important_date_label,
+            "contact_related_name": contact.related_name,
+            "contact_social_profile": contact.social_profile,
+            "contact_notes": contact.notes,
+        }
+    )
+    return values
+
+
+def normalized_match_value(value: str | None) -> str:
+    return (value or "").strip().casefold()
+
+
+def normalized_phone_value(value: str | None) -> str:
+    return sub(r"\D", "", value or "")
+
+
+def contact_for_client(session: Session, client: Client) -> Contact | None:
+    client_name = normalized_match_value(client.name)
+    client_email = normalized_match_value(client.email)
+    client_numbers = {normalized_phone_value(phone_number) for phone_number in (client.phone, client.whatsapp) if phone_number}
+    contacts = session.exec(select(Contact).where(Contact.active == True)).all()  # noqa: E712
+    for contact in contacts:
+        contact_numbers = {normalized_phone_value(phone_number) for phone_number in (contact.phone, contact.whatsapp) if phone_number}
+        if client_name and normalized_match_value(contact.name) == client_name:
+            return contact
+        if client_email and normalized_match_value(contact.email) == client_email:
+            return contact
+        if contact_numbers.intersection(client_numbers):
+            return contact
+    return None
+
+
 def schedule_client_ids(schedule: ClientMessageSchedule) -> list[int]:
     return [int(value) for value in schedule.client_ids.split(",") if value.strip().isdigit()]
 
@@ -626,26 +722,25 @@ def client_message_text(session: Session, client: Client, message_type: str) -> 
     }
     fallback = f"Hello {{client_name}}, please submit required documents for {fallback_variables.get(message_type, '{work_scope}')}."
     template = message_template_body(session, key, fallback)
-    return render_template(
-        template,
-        {
-            "client_name": client.name,
-            "work_scope": message_content,
-            "notes": message_content,
-            "block": message_content,
-        },
-    )
+    values = {
+        **client_template_values(client),
+        **contact_template_values(contact_for_client(session, client)),
+        "message_content": message_content,
+        "work_scope": message_content,
+        "notes": message_content,
+        "block": message_content,
+    }
+    return render_template(template, values)
 
 
 def birthday_message_text(session: Session, client: Client) -> str:
     template = message_template_body(session, "client_birthday", "Happy Birthday {client_name}. Wishing you a wonderful year ahead.")
-    return render_template(
-        template,
-        {
-            "client_name": client.name,
-            "birth_date": client.birth_date.isoformat() if client.birth_date else "",
-        },
-    )
+    values = {
+        **client_template_values(client),
+        **contact_template_values(contact_for_client(session, client)),
+    }
+    values["birth_date"] = values["client_birth_date"]
+    return render_template(template, values)
 
 
 def parse_assistant_date(text: str) -> date:
