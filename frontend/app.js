@@ -1706,17 +1706,47 @@ const TEMPLATE_VARIABLES = {
   telegram_daily: TELEGRAM_TEMPLATE_VARIABLES,
 };
 
-function templateVariableButtons(templateKey) {
-  const variables = TEMPLATE_VARIABLES[templateKey] || [];
-  return variables
-    .map(
-      ([name, label]) => `
-        <button class="variable-chip" data-action="insert-template-variable" data-key="${escapeHtml(templateKey)}" data-variable="{${escapeHtml(name)}}" title="${escapeHtml(label)}" type="button">
-          {${escapeHtml(name)}}
-        </button>
-      `
-    )
+function templateKeyOptions() {
+  return state.messageTemplates
+    .map((template, index) => `<option value="${escapeHtml(template.key)}" ${index === 0 ? "selected" : ""}>${escapeHtml(template.name)}</option>`)
     .join("");
+}
+
+function templateVariablePanel() {
+  const allVariables = uniqueTemplateVariables([
+    CLIENT_TEMPLATE_VARIABLES,
+    CONTACT_TEMPLATE_VARIABLES,
+    TASK_TEMPLATE_VARIABLES,
+    TASK_STAGE_TEMPLATE_VARIABLES,
+    MESSAGE_CONTENT_TEMPLATE_VARIABLES,
+    BIRTHDAY_TEMPLATE_VARIABLES,
+    TELEGRAM_TEMPLATE_VARIABLES,
+  ]);
+  return `
+    <aside class="template-variable-panel">
+      <div class="panel-head">
+        <h3>Template variables</h3>
+        <span class="mini">Select once, insert anywhere</span>
+      </div>
+      <label>
+        Insert into
+        <select data-template-target>
+          ${templateKeyOptions()}
+        </select>
+      </label>
+      <div class="variable-list compact" aria-label="Template variables">
+        ${allVariables
+          .map(
+            ([name, label]) => `
+              <button class="variable-chip" data-action="insert-template-variable" data-variable="{${escapeHtml(name)}}" title="${escapeHtml(label)}" type="button">
+                {${escapeHtml(name)}}
+              </button>
+            `
+          )
+          .join("")}
+      </div>
+    </aside>
+  `;
 }
 
 function templateFormatToolbar(templateKey) {
@@ -1745,24 +1775,24 @@ function messageTemplateList() {
         <h3>Message templates</h3>
         <span class="mini">${state.messageTemplates.length} editable</span>
       </div>
-      <div class="template-list">
-        ${state.messageTemplates
-          .map(
-            (template) => `
-              <article class="template-card">
-                <div class="panel-head">
-                  <h3>${escapeHtml(template.name)}</h3>
-                  <button class="secondary-button" data-action="save-template" data-key="${escapeHtml(template.key)}" type="button">Save</button>
-                </div>
-                ${templateFormatToolbar(template.key)}
-                <textarea data-template-body="${escapeHtml(template.key)}" rows="4">${escapeHtml(template.body)}</textarea>
-                <div class="variable-list" aria-label="Template variables">
-                  ${templateVariableButtons(template.key)}
-                </div>
-              </article>
-            `
-          )
-          .join("")}
+      <div class="template-workspace">
+        <div class="template-list">
+          ${state.messageTemplates
+            .map(
+              (template) => `
+                <article class="template-card">
+                  <div class="panel-head">
+                    <h3>${escapeHtml(template.name)}</h3>
+                    <button class="secondary-button" data-action="save-template" data-key="${escapeHtml(template.key)}" type="button">Save</button>
+                  </div>
+                  ${templateFormatToolbar(template.key)}
+                  <textarea data-template-body="${escapeHtml(template.key)}" rows="4">${escapeHtml(template.body)}</textarea>
+                </article>
+              `
+            )
+            .join("")}
+        </div>
+        ${templateVariablePanel()}
       </div>
     </div>
   `;
@@ -2183,7 +2213,17 @@ async function saveMessageTemplate(templateKey) {
   render();
 }
 
+function activeTemplateKey() {
+  return document.querySelector("[data-template-target]")?.value || state.messageTemplates[0]?.key || "";
+}
+
+function setActiveTemplateKey(templateKey) {
+  const selector = document.querySelector("[data-template-target]");
+  if (selector && templateKey) selector.value = templateKey;
+}
+
 function insertTemplateVariable(templateKey, variable) {
+  if (!templateKey || !variable) return;
   insertIntoTemplate(templateKey, variable);
 }
 
@@ -2834,7 +2874,7 @@ function bindEvents() {
       return;
     }
     if (target.dataset.action === "insert-template-variable") {
-      insertTemplateVariable(target.dataset.key, target.dataset.variable);
+      insertTemplateVariable(target.dataset.key || activeTemplateKey(), target.dataset.variable);
       return;
     }
     if (target.dataset.action === "format-template") {
@@ -2845,6 +2885,10 @@ function bindEvents() {
     if (!task) return;
     if (target.dataset.action === "edit") openTaskDialog(task);
     if (target.dataset.action === "complete") completeTask(task);
+  });
+  document.body.addEventListener("focusin", (event) => {
+    const field = event.target.closest("[data-template-body]");
+    if (field) setActiveTemplateKey(field.dataset.templateBody);
   });
   document.body.addEventListener("change", (event) => {
     const target = event.target.closest("[data-filter]");

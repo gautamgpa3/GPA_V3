@@ -615,9 +615,45 @@ button {
   gap: 8px;
 }
 
+.template-workspace {
+  align-items: start;
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+}
+
 .template-list {
   display: grid;
   gap: 12px;
+}
+
+.template-variable-panel {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  position: sticky;
+  top: 14px;
+}
+
+.template-variable-panel label {
+  color: var(--muted);
+  display: grid;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 6px;
+  text-transform: uppercase;
+}
+
+.template-variable-panel select {
+  background: var(--control);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  min-height: 38px;
+  padding: 0 10px;
 }
 
 .template-card {
@@ -668,6 +704,12 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.variable-list.compact {
+  max-height: 520px;
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .variable-chip {
@@ -1347,5 +1389,15 @@ textarea {
   .task-form {
     max-height: 92vh;
     overflow: auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .template-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .template-variable-panel {
+    position: static;
   }
 }
