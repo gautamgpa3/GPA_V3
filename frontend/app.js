@@ -334,6 +334,29 @@ function normalizeTask(task) {
   };
 }
 
+function taskUpdatePayload(task, overrides = {}) {
+  const next = Object.assign({}, task, overrides);
+  return {
+    title: next.title || "",
+    description: next.description || "",
+    topic: next.topic || "",
+    task_time: next.task_time || "",
+    category: next.category || "Client",
+    priority: next.priority || "Normal",
+    status: next.status || "Pending",
+    client_id: next.client_id ? Number(next.client_id) : null,
+    start_date: next.start_date || todayISO(),
+    due_date: next.due_date || todayISO(),
+    reminder: Boolean(next.reminder),
+    repeat_type: next.repeat_type || "None",
+    repeat_every: Number(next.repeat_every || 1),
+    owner: next.owner || "Me",
+    issue: next.issue || "",
+    notes: next.notes || "",
+    archived: Boolean(next.archived),
+  };
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     cache: "no-store",
@@ -598,6 +621,12 @@ function openTasks() {
   return state.tasks.filter((task) => !taskDerived(task).isDone && !task.archived);
 }
 
+function completedTasks() {
+  return state.tasks
+    .filter((task) => task.status === "Completed" && !task.archived)
+    .sort((a, b) => (b.completed_at || b.updated_at || "").localeCompare(a.completed_at || a.updated_at || ""));
+}
+
 function pendingTasks() {
   return openTasks().filter((task) => {
     const derived = taskDerived(task);
@@ -654,6 +683,18 @@ async function completeTask(task) {
   sendTaskStageWhatsApp(completedTask, "completed", task);
 }
 
+async function reopenTask(task) {
+  if (!window.confirm(`Move "${taskDisplayTitle(task)}" back to pending?`)) return;
+  await api(`${API_TASKS_URL}/${task.id}`, {
+    method: "PUT",
+    body: JSON.stringify(taskUpdatePayload(task, { status: "Pending" })),
+  });
+  await loadTasks();
+  await loadDueMessages();
+  await loadActivity();
+  render();
+}
+
 async function deleteTask(task) {
   if (!window.confirm(`Delete "${taskDisplayTitle(task)}"? This cannot be undone.`)) return;
   await api(`${API_TASKS_URL}/${task.id}`, { method: "DELETE" });
@@ -674,8 +715,9 @@ function taskCard(task) {
   if (d.overdue) classes.push("overdue");
   if (d.dueSoon) classes.push("due-soon");
   if (d.isDone) classes.push("completed");
-  const dayText = d.overdue ? `${Math.abs(d.daysLeft)} days overdue` : d.daysLeft === 0 ? "Due today" : task.due_date ? `${d.daysLeft} days left` : "No due date";
-  const startText = d.hasStarted ? `Active ${d.age} days` : `Starts in ${diffDays(task.start_date)} days`;
+  const completedText = task.completed_at ? `Completed ${formatTimestamp(task.completed_at)}` : "Completed";
+  const dayText = d.isDone ? completedText : d.overdue ? `${Math.abs(d.daysLeft)} days overdue` : d.daysLeft === 0 ? "Due today" : task.due_date ? `${d.daysLeft} days left` : "No due date";
+  const startText = d.isDone ? completedText : d.hasStarted ? `Active ${d.age} days` : `Starts in ${diffDays(task.start_date)} days`;
   const repeatText = task.repeat_type === "None" ? "One-time" : task.repeat_type === "Custom Days" ? `Every ${task.repeat_every} days` : task.repeat_type;
   return `
     <article class="${classes.join(" ")}" data-id="${task.id}">
@@ -685,7 +727,7 @@ function taskCard(task) {
           <div class="task-meta">${escapeHtml(task.category)} - ${formatDate(task.due_date)}${task.task_time ? ` at ${escapeHtml(task.task_time)}` : ""} - ${startText}</div>
           ${task.topic ? `<div class="task-meta">Topic: ${escapeHtml(task.topic)}</div>` : ""}
         </div>
-        ${d.isDone ? "" : `<button class="icon-button" data-action="complete" data-id="${task.id}" title="Mark complete">OK</button>`}
+        ${d.isDone ? `<button class="secondary-button link-button" data-action="reopen" data-id="${task.id}" title="Move back to pending" type="button">Reopen</button>` : `<button class="icon-button" data-action="complete" data-id="${task.id}" title="Mark complete">OK</button>`}
       </div>
       <div class="badges">
         ${createBadge(task.status, task.status === "Blocked" || task.status === "Delayed" ? "red" : task.status === "Waiting" ? "amber" : "green")}
@@ -735,7 +777,7 @@ function getStats() {
     dueToday: open.filter((task) => diffDays(task.due_date) === 0).length,
     overdue: overdue.length,
     blocked: open.filter((task) => task.status === "Blocked" || task.issue).length,
-    completed: state.tasks.filter((task) => task.status === "Completed").length,
+    completed: completedTasks().length,
     recurring: open.filter((task) => task.repeat_type && task.repeat_type !== "None").length,
   };
 }
@@ -752,6 +794,7 @@ function dashboardMetricTasks(metric) {
     next7: ["Next 7 days", pending.filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !today.includes(task))],
     blocked: ["Blocked / issue", open.filter((task) => task.status === "Blocked" || task.issue)],
     recurring: ["Recurring work", open.filter((task) => task.repeat_type && task.repeat_type !== "None")],
+    completed: ["Completed tasks", completedTasks()],
   };
   return groups[metric] || ["Tasks", []];
 }
@@ -805,6 +848,7 @@ function renderDashboard() {
   const overdue = overdueTasks();
   const soon = pending.filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !today.includes(task));
   const blocked = open.filter((task) => task.status === "Blocked" || task.issue);
+  const completed = completedTasks();
 
   els.views.dashboard.innerHTML = `
     <div class="metric-grid">
@@ -813,6 +857,7 @@ function renderDashboard() {
       ${metricCard("Overdue", stats.overdue, "overdue")}
       ${metricCard("Pending work", stats.active, "active")}
       ${metricCard("Blocked / issue", stats.blocked, "blocked")}
+      ${metricCard("Completed", stats.completed, "completed")}
     </div>
     ${metricDetailsPanel()}
     <div class="content-grid">
@@ -839,6 +884,10 @@ function renderDashboard() {
       <div class="panel">
         <div class="panel-head"><h3>Recurring work</h3><span class="mini">${stats.recurring} scheduled</span></div>
         ${renderDashboardTaskPreview(open.filter((task) => task.repeat_type && task.repeat_type !== "None"), "No recurring work yet", "recurring")}
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>Completed tasks</h3><span class="mini">${completed.length} completed</span></div>
+        ${renderDashboardTaskPreview(completed, "No completed tasks yet", "completed")}
       </div>
       <div class="panel">
         <div class="panel-head"><h3>AI suggestions</h3><span class="mini">From your data</span></div>
@@ -2885,6 +2934,7 @@ function bindEvents() {
     if (!task) return;
     if (target.dataset.action === "edit") openTaskDialog(task);
     if (target.dataset.action === "complete") completeTask(task);
+    if (target.dataset.action === "reopen") reopenTask(task);
   });
   document.body.addEventListener("focusin", (event) => {
     const field = event.target.closest("[data-template-body]");
