@@ -1452,6 +1452,7 @@ function renderContacts() {
                 <div class="inline-actions contact-actions">
                   <button class="secondary-button link-button" data-action="contact-whatsapp" data-id="${contact.id}" type="button">WhatsApp</button>
                   <button class="secondary-button link-button" data-action="contact-sms" data-id="${contact.id}" type="button">SMS</button>
+                  <button class="secondary-button link-button" data-action="contact-sync-google" data-id="${contact.id}" type="button">Sync Google</button>
                   <button class="secondary-button" data-action="contact-to-client" data-id="${contact.id}" type="button">Make client</button>
                 </div>
               </article>
@@ -1598,6 +1599,21 @@ async function syncGoogleContacts() {
     await loadActivity();
     render();
     window.alert(`Google sync complete. Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}`);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function syncOneGoogleContact(contactId) {
+  const contact = state.contacts.find((item) => String(item.id) === String(contactId));
+  if (!contact) return;
+  if (!window.confirm(`Sync "${contact.name}" from Google now? This will update this GPA contact from Google.`)) return;
+  try {
+    const result = await api(`${API_CONTACTS_URL}/${contact.id}/sync/google`, { method: "POST" });
+    await loadContacts();
+    await loadActivity();
+    render();
+    window.alert(result.message || `Google contact sync complete. Updated: ${result.updated}, Skipped: ${result.skipped}`);
   } catch (error) {
     window.alert(error.message);
   }
@@ -2878,6 +2894,10 @@ function bindEvents() {
     }
     if (target.dataset.action === "push-google-contacts") {
       pushGoogleContacts();
+      return;
+    }
+    if (target.dataset.action === "contact-sync-google") {
+      syncOneGoogleContact(target.dataset.id);
       return;
     }
     if (target.dataset.action === "contact-whatsapp") {

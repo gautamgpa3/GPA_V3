@@ -14,7 +14,7 @@ from backend.models.master_data import Category, Owner, Priority, RepeatType, St
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
-from backend.services.google_contacts import push_gpa_contacts_to_google, sync_google_contacts
+from backend.services.google_contacts import push_gpa_contacts_to_google, sync_google_contacts, sync_single_google_contact
 from backend.services.icloud_contacts import sync_icloud_contacts
 
 router = APIRouter(prefix="/api", tags=["Tasks"])
@@ -255,6 +255,22 @@ def next_date(value: date | None, repeat_type: str, repeat_every: int) -> date |
     return None
 
 
+def same_task_identity(existing: Task, data: dict, exclude_id: int | None = None) -> bool:
+    if exclude_id is not None and existing.id == exclude_id:
+        return False
+    if existing.archived or task_is_done(existing):
+        return False
+    return (existing.title or "").strip().casefold() == data["title"].strip().casefold() and existing.client_id == data["client_id"]
+
+
+def ensure_unique_open_task(session: Session, data: dict, exclude_id: int | None = None) -> None:
+    duplicate = next((task for task in session.exec(select(Task)).all() if same_task_identity(task, data, exclude_id)), None)
+    if duplicate:
+        client = session.get(Client, data["client_id"]) if data["client_id"] is not None else None
+        owner = client.name if client else "No client"
+        raise HTTPException(status_code=400, detail=f"Duplicate task blocked: {data['title']} already exists for {owner}.")
+
+
 def normalize_task_data(task_data: TaskCreate | TaskUpdate, session: Session) -> dict:
     data = task_data.model_dump()
     data["title"] = data["title"].strip()
@@ -290,8 +306,7 @@ def normalize_task_data(task_data: TaskCreate | TaskUpdate, session: Session) ->
     return data
 
 
-def apply_task_data(task: Task, task_data: TaskCreate | TaskUpdate, session: Session) -> tuple[Task, str]:
-    data = normalize_task_data(task_data, session)
+def apply_normalized_task_data(task: Task, data: dict) -> tuple[Task, str]:
     changes = task_change_details(task, data)
     for field, value in data.items():
         setattr(task, field, value)
@@ -301,6 +316,10 @@ def apply_task_data(task: Task, task_data: TaskCreate | TaskUpdate, session: Ses
         task.completed_at = None
     task.updated_at = now()
     return task, changes
+
+
+def apply_task_data(task: Task, task_data: TaskCreate | TaskUpdate, session: Session) -> tuple[Task, str]:
+    return apply_normalized_task_data(task, normalize_task_data(task_data, session))
 
 
 def create_next_occurrence(task: Task) -> Task | None:
@@ -1277,6 +1296,18 @@ def sync_contacts_from_google(session: Session = Depends(get_session)):
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
+@router.post("/contacts/{contact_id}/sync/google")
+def sync_one_contact_from_google(contact_id: int, session: Session = Depends(get_session)):
+    try:
+        return sync_single_google_contact(session, contact_id)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
 @router.post("/contacts/push/google")
 def push_contacts_to_google(session: Session = Depends(get_session)):
     try:
@@ -1460,7 +1491,9 @@ def get_briefing(session: Session = Depends(get_session)):
 
 @router.post("/tasks")
 def create_task(task_data: TaskCreate, session: Session = Depends(get_session)):
-    task = Task(created_at=now(), **normalize_task_data(task_data, session))
+    data = normalize_task_data(task_data, session)
+    ensure_unique_open_task(session, data)
+    task = Task(created_at=now(), **data)
     session.add(task)
     session.flush()
     log_activity(session, "CREATED", "task", f"Added task: {task.title}", task.id, task.uuid)
@@ -1471,7 +1504,10 @@ def create_task(task_data: TaskCreate, session: Session = Depends(get_session)):
 
 @router.put("/tasks/{task_id}")
 def update_task(task_id: int, task_data: TaskUpdate, session: Session = Depends(get_session)):
-    task, changes = apply_task_data(get_task_or_404(task_id, session), task_data, session)
+    current_task = get_task_or_404(task_id, session)
+    data = normalize_task_data(task_data, session)
+    ensure_unique_open_task(session, data, exclude_id=task_id)
+    task, changes = apply_normalized_task_data(current_task, data)
     session.add(task)
     log_activity(session, "UPDATED", "task", f"Updated task: {task.title}", task.id, task.uuid, changes or "No field changes")
     session.commit()
@@ -1588,20 +1624,27 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
         topic = assistant_topic(text)
         task_time = assistant_task_time(text)
         details = assistant_details(text)
-        task = Task(
-            title=title,
-            description="",
-            category=client.category if client else "Client",
-            priority=assistant_priority(lower),
-            status="Pending",
-            client_id=client.id if client else None,
-            task_time=task_time,
-            topic=topic,
-            start_date=due,
-            due_date=due,
-            owner="Me",
-            notes=details,
-        )
+        data = {
+            "title": title,
+            "description": "",
+            "category": client.category if client else "Client",
+            "priority": assistant_priority(lower),
+            "status": "Pending",
+            "client_id": client.id if client else None,
+            "task_time": task_time,
+            "topic": topic,
+            "start_date": due,
+            "due_date": due,
+            "reminder": True,
+            "repeat_type": "None",
+            "repeat_every": 1,
+            "owner": "Me",
+            "issue": "",
+            "notes": details,
+            "archived": False,
+        }
+        ensure_unique_open_task(session, data)
+        task = Task(**data)
         session.add(task)
         session.flush()
         log_activity(session, "CREATED", "task", f"AI added task: {task.title}", task.id, task.uuid)

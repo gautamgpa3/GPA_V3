@@ -226,6 +226,8 @@ def contact_conflict(session: Session, contact: ParsedGoogleContact, exclude_id:
             return existing
         if contact.email and existing.email and contact.email == existing.email:
             return existing
+        if contact.name and existing.name.strip().casefold() == contact.name.strip().casefold():
+            return existing
     return None
 
 
@@ -234,11 +236,17 @@ def find_google_match(session: Session, contact: ParsedGoogleContact) -> Contact
         existing = session.exec(select(Contact).where(Contact.google_resource_name == contact.google_resource_name)).first()
         if existing:
             return existing
+    contacts = session.exec(select(Contact)).all()
+    if contact.phone:
+        existing = next((item for item in contacts if contact.phone in {item.phone, item.whatsapp}), None)
+        if existing:
+            return existing
+    if contact.email:
+        existing = next((item for item in contacts if item.email and item.email == contact.email), None)
+        if existing:
+            return existing
     normalized_name = contact.name.strip().casefold()
-    return next(
-        (existing for existing in session.exec(select(Contact)).all() if existing.name.strip().casefold() == normalized_name),
-        None,
-    )
+    return next((existing for existing in contacts if existing.name.strip().casefold() == normalized_name), None)
 
 
 def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact], dry_run: bool = False) -> dict:
@@ -253,22 +261,23 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
                 skipped += 1
                 continue
             if not dry_run:
-                existing.first_name = item.first_name or existing.first_name
-                existing.last_name = item.last_name or existing.last_name
-                existing.phone = item.phone or existing.phone
-                existing.phone_label = item.phone_label or existing.phone_label
-                existing.whatsapp = existing.whatsapp or item.whatsapp or item.phone
-                existing.whatsapp_label = existing.whatsapp_label or item.whatsapp_label
-                existing.email = item.email or existing.email
-                existing.company = item.company or existing.company
-                existing.address = item.address or existing.address
-                existing.location_url = item.location_url or existing.location_url
-                existing.birth_date = item.birth_date or existing.birth_date
-                existing.important_date = item.important_date or existing.important_date
-                existing.important_date_label = item.important_date_label or existing.important_date_label
-                existing.related_name = item.related_name or existing.related_name
-                existing.social_profile = item.social_profile or existing.social_profile
-                existing.notes = item.notes or existing.notes
+                existing.name = item.name or existing.name
+                existing.first_name = item.first_name
+                existing.last_name = item.last_name
+                existing.phone = item.phone
+                existing.phone_label = item.phone_label or "Mobile"
+                existing.whatsapp = item.whatsapp or item.phone
+                existing.whatsapp_label = item.whatsapp_label or "WhatsApp"
+                existing.email = item.email
+                existing.company = item.company
+                existing.address = item.address
+                existing.location_url = item.location_url
+                existing.birth_date = item.birth_date
+                existing.important_date = item.important_date
+                existing.important_date_label = item.important_date_label
+                existing.related_name = item.related_name
+                existing.social_profile = item.social_profile
+                existing.notes = item.notes
                 existing.google_resource_name = item.google_resource_name or existing.google_resource_name
                 existing.google_etag = item.google_etag or existing.google_etag
                 existing.active = True
@@ -370,6 +379,26 @@ def sync_google_contacts(session: Session, dry_run: bool = False, credentials_pa
     credentials = load_google_credentials(credentials_path)
     parsed = [contact for contact in (parse_google_person(person) for person in fetch_google_people(credentials)) if contact]
     return upsert_google_contacts(session, parsed, dry_run=dry_run)
+
+
+def sync_single_google_contact(session: Session, contact_id: int, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
+    contact = session.get(Contact, contact_id)
+    if not contact:
+        return {"success": False, "created": 0, "updated": 0, "skipped": 1, "total": 0, "dry_run": dry_run, "message": "Contact not found"}
+    credentials = load_google_credentials(credentials_path)
+    parsed = [item for item in (parse_google_person(person) for person in fetch_google_people(credentials)) if item]
+    match = next((item for item in parsed if item.google_resource_name and item.google_resource_name == contact.google_resource_name), None)
+    if not match and (contact.phone or contact.whatsapp):
+        numbers = {value for value in (contact.phone, contact.whatsapp) if value}
+        match = next((item for item in parsed if item.phone and item.phone in numbers), None)
+    if not match and contact.email:
+        match = next((item for item in parsed if item.email and item.email == contact.email), None)
+    if not match:
+        normalized_name = contact.name.strip().casefold()
+        match = next((item for item in parsed if item.name.strip().casefold() == normalized_name), None)
+    if not match:
+        return {"success": True, "created": 0, "updated": 0, "skipped": 1, "total": 0, "dry_run": dry_run, "message": "No matching Google contact found"}
+    return upsert_google_contacts(session, [match], dry_run=dry_run)
 
 
 def push_gpa_contacts_to_google(session: Session, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
