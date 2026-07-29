@@ -487,6 +487,32 @@ def audit_google_contacts(session: Session, query: str = "", limit: int = 25, cr
     }
 
 
+def restore_google_contacts_by_query(session: Session, query: str, credentials_path: Path | None = None) -> dict:
+    clean_query = query.strip()
+    if not clean_query:
+        return {"success": False, "created": 0, "updated": 0, "skipped": 0, "total": 0, "message": "Search text is required"}
+    credentials = load_google_credentials(credentials_path)
+    people = fetch_google_people(credentials)
+    parsed = [contact for contact in (parse_google_person(person) for person in people) if contact]
+    matches = [contact for contact in parsed if audit_search_match(contact, clean_query)]
+    if not matches:
+        return {
+            "success": True,
+            "created": 0,
+            "updated": 0,
+            "skipped": 0,
+            "total": 0,
+            "google_fetched": len(people),
+            "google_parsed": len(parsed),
+            "message": "No Google contact matched this search.",
+        }
+    result = upsert_google_contacts(session, matches)
+    result["google_fetched"] = len(people)
+    result["google_parsed"] = len(parsed)
+    result["message"] = f"Restored/synced {len(matches)} Google contact match(es)."
+    return result
+
+
 def sync_single_google_contact(session: Session, contact_id: int, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
     contact = session.get(Contact, contact_id)
     if not contact:

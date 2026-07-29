@@ -1409,6 +1409,7 @@ function renderContacts() {
           <button class="secondary-button" data-action="sync-icloud-contacts">Sync iCloud</button>
           <button class="secondary-button" data-action="sync-google-contacts">Sync Google</button>
           <button class="secondary-button" data-action="audit-google-contacts">Audit Google</button>
+          <button class="secondary-button" data-action="restore-google-contact">Restore Google</button>
           <button class="secondary-button" data-action="push-google-contacts">Push Google</button>
           <button class="secondary-button" data-action="import-contacts">Import</button>
           <button class="secondary-button" data-action="export-contacts">Export</button>
@@ -1665,6 +1666,26 @@ async function auditGoogleContacts() {
   try {
     const result = await api(`${API_CONTACTS_URL}/audit/google?query=${encodeURIComponent(cleanQuery)}`);
     window.alert(googleAuditSummary(result));
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function restoreGoogleContact() {
+  const query = window.prompt("Enter Google contact name, phone, or email to restore/sync into GPA:");
+  if (query === null) return;
+  const cleanQuery = query.trim();
+  if (!cleanQuery) {
+    window.alert("Please enter a name, phone, or email.");
+    return;
+  }
+  if (!window.confirm(`Restore/sync Google contact match for "${cleanQuery}" into GPA?`)) return;
+  try {
+    const result = await api(`${API_CONTACTS_URL}/restore/google?query=${encodeURIComponent(cleanQuery)}`, { method: "POST" });
+    await loadContacts();
+    await loadActivity();
+    render();
+    window.alert(`${result.message || "Google restore complete."}\nCreated: ${result.created}\nUpdated: ${result.updated}\nSkipped: ${result.skipped}\nVisible GPA contacts: ${result.visible_contacts ?? state.contacts.length}`);
   } catch (error) {
     window.alert(error.message);
   }
@@ -2965,6 +2986,10 @@ function bindEvents() {
     }
     if (target.dataset.action === "audit-google-contacts") {
       auditGoogleContacts();
+      return;
+    }
+    if (target.dataset.action === "restore-google-contact") {
+      restoreGoogleContact();
       return;
     }
     if (target.dataset.action === "push-google-contacts") {

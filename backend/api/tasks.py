@@ -16,7 +16,7 @@ from backend.models.master_data import Category, Owner, Priority, RepeatType, St
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
-from backend.services.google_contacts import audit_google_contacts, push_gpa_contacts_to_google, sync_google_contacts, sync_single_google_contact
+from backend.services.google_contacts import audit_google_contacts, push_gpa_contacts_to_google, restore_google_contacts_by_query, sync_google_contacts, sync_single_google_contact
 from backend.services.icloud_contacts import sync_icloud_contacts
 from backend.services.whatsapp_business import send_whatsapp_text, whatsapp_settings
 
@@ -1457,6 +1457,21 @@ def get_google_contacts_sync_job(job_id: str):
 def audit_contacts_from_google(query: str = "", session: Session = Depends(get_session)):
     try:
         return audit_google_contacts(session, query=query)
+    except FileNotFoundError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+@router.post("/contacts/restore/google")
+def restore_contacts_from_google(query: str = "", session: Session = Depends(get_session)):
+    try:
+        result = restore_google_contacts_by_query(session, query=query)
+        log_activity(session, "RESTORED", "contact", f"Google contact restore: {query}", details=str(result))
+        session.commit()
+        return result
     except FileNotFoundError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     except ValueError as error:
