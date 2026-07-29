@@ -1,12 +1,14 @@
 from calendar import monthrange
 from datetime import date, datetime, timedelta
+from threading import Lock, Thread
 from re import fullmatch, search, sub
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
-from backend.database.engine import get_session
+from backend.database.engine import engine, get_session
 from backend.models.activity import ActivityLog
 from backend.models.client import Client
 from backend.models.contact import Contact
@@ -18,6 +20,9 @@ from backend.services.google_contacts import audit_google_contacts, push_gpa_con
 from backend.services.icloud_contacts import sync_icloud_contacts
 
 router = APIRouter(prefix="/api", tags=["Tasks"])
+
+GOOGLE_SYNC_JOBS: dict[str, dict] = {}
+GOOGLE_SYNC_LOCK = Lock()
 
 
 class TaskBase(BaseModel):
@@ -1305,6 +1310,61 @@ def sync_contacts_from_google(session: Session = Depends(get_session)):
         raise HTTPException(status_code=400, detail=str(error)) from error
     except RuntimeError as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+def set_google_sync_job(job_id: str, **values):
+    with GOOGLE_SYNC_LOCK:
+        job = GOOGLE_SYNC_JOBS.setdefault(job_id, {})
+        job.update(values)
+
+
+def run_google_sync_job(job_id: str):
+    set_google_sync_job(job_id, status="running", started_at=now().isoformat(), message="Google contact sync is running.")
+    try:
+        with Session(engine) as session:
+            result = sync_google_contacts(session)
+        set_google_sync_job(
+            job_id,
+            status="completed",
+            completed_at=now().isoformat(),
+            message="Google contact sync completed.",
+            result=result,
+        )
+    except Exception as error:  # noqa: BLE001
+        set_google_sync_job(
+            job_id,
+            status="failed",
+            completed_at=now().isoformat(),
+            message=str(error),
+            result=None,
+        )
+
+
+@router.post("/contacts/sync/google/start")
+def start_google_contacts_sync():
+    with GOOGLE_SYNC_LOCK:
+        for existing_job_id, job in GOOGLE_SYNC_JOBS.items():
+            if job.get("status") in {"queued", "running"}:
+                return {
+                    "success": True,
+                    "job_id": existing_job_id,
+                    "status": job.get("status"),
+                    "message": "Google contact sync is already running.",
+                }
+    job_id = str(uuid4())
+    set_google_sync_job(job_id, status="queued", created_at=now().isoformat(), message="Google contact sync queued.")
+    worker = Thread(target=run_google_sync_job, args=(job_id,), daemon=True)
+    worker.start()
+    return {"success": True, "job_id": job_id, "status": "queued", "message": "Google contact sync started."}
+
+
+@router.get("/contacts/sync/google/jobs/{job_id}")
+def get_google_contacts_sync_job(job_id: str):
+    with GOOGLE_SYNC_LOCK:
+        job = GOOGLE_SYNC_JOBS.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Google sync job not found")
+        return {"job_id": job_id, **job}
 
 
 @router.get("/contacts/audit/google")

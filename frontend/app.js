@@ -1595,7 +1595,9 @@ async function syncIcloudContacts() {
 async function syncGoogleContacts() {
   if (!window.confirm("Sync contacts from Google into GPA now? This will not change your Google contacts.")) return;
   try {
-    const result = await api(`${API_CONTACTS_URL}/sync/google`, { method: "POST" });
+    const started = await api(`${API_CONTACTS_URL}/sync/google/start`, { method: "POST" });
+    window.alert("Google sync started. GPA will keep checking until it finishes.");
+    const result = await waitForGoogleSync(started.job_id);
     await loadContacts();
     await loadActivity();
     render();
@@ -1613,6 +1615,20 @@ async function syncGoogleContacts() {
   } catch (error) {
     window.alert(error.message);
   }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForGoogleSync(jobId) {
+  for (let attempt = 0; attempt < 180; attempt += 1) {
+    const job = await api(`${API_CONTACTS_URL}/sync/google/jobs/${jobId}`);
+    if (job.status === "completed") return job.result || {};
+    if (job.status === "failed") throw new Error(job.message || "Google sync failed.");
+    await sleep(2000);
+  }
+  throw new Error("Google sync is still running. Please refresh contacts after a few minutes.");
 }
 
 function googleAuditSummary(result) {
