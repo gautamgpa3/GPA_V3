@@ -403,6 +403,90 @@ def sync_google_contacts(session: Session, dry_run: bool = False, credentials_pa
     return result
 
 
+def audit_search_match(contact: ParsedGoogleContact, query: str) -> bool:
+    clean_query = query.strip().casefold()
+    query_digits = sub(r"\D", "", query or "")
+    haystack = " ".join(
+        [
+            contact.name,
+            contact.first_name,
+            contact.last_name,
+            contact.phone,
+            contact.whatsapp,
+            contact.email,
+            contact.company,
+        ]
+    ).casefold()
+    if clean_query and clean_query in haystack:
+        return True
+    return bool(query_digits and query_digits in f"{contact.phone}{contact.whatsapp}")
+
+
+def contact_match_reason(google_contact: ParsedGoogleContact, gpa_contact: Contact | None) -> str:
+    if not gpa_contact:
+        return "No GPA contact matched by Google ID, phone, email, or name."
+    if google_contact.google_resource_name and google_contact.google_resource_name == gpa_contact.google_resource_name:
+        return "Matched by Google contact ID."
+    if google_contact.phone and google_contact.phone in {gpa_contact.phone, gpa_contact.whatsapp}:
+        return "Matched by phone or WhatsApp number."
+    if google_contact.email and gpa_contact.email and google_contact.email == gpa_contact.email:
+        return "Matched by email."
+    if google_contact.name.strip().casefold() == gpa_contact.name.strip().casefold():
+        return "Matched by name."
+    return "Matched by duplicate protection."
+
+
+def audit_contact_result(session: Session, google_contact: ParsedGoogleContact) -> dict:
+    gpa_contact = find_google_match(session, google_contact)
+    if not gpa_contact:
+        status = "missing_from_gpa"
+    elif not gpa_contact.active:
+        status = "inactive_in_gpa"
+    elif google_contact.google_resource_name and gpa_contact.google_resource_name and google_contact.google_resource_name != gpa_contact.google_resource_name:
+        status = "merged_with_existing_gpa_contact"
+    else:
+        status = "visible_in_gpa"
+    return {
+        "status": status,
+        "reason": contact_match_reason(google_contact, gpa_contact),
+        "google": {
+            "name": google_contact.name,
+            "phone": google_contact.phone,
+            "email": google_contact.email,
+            "company": google_contact.company,
+            "resource_name": google_contact.google_resource_name,
+        },
+        "gpa": {
+            "id": gpa_contact.id if gpa_contact else None,
+            "name": gpa_contact.name if gpa_contact else "",
+            "phone": gpa_contact.phone if gpa_contact else "",
+            "whatsapp": gpa_contact.whatsapp if gpa_contact else "",
+            "email": gpa_contact.email if gpa_contact else "",
+            "company": gpa_contact.company if gpa_contact else "",
+            "active": gpa_contact.active if gpa_contact else False,
+            "resource_name": gpa_contact.google_resource_name if gpa_contact else "",
+        },
+    }
+
+
+def audit_google_contacts(session: Session, query: str = "", limit: int = 25, credentials_path: Path | None = None) -> dict:
+    credentials = load_google_credentials(credentials_path)
+    people = fetch_google_people(credentials)
+    parsed = [contact for contact in (parse_google_person(person) for person in people) if contact]
+    matches = [contact for contact in parsed if not query.strip() or audit_search_match(contact, query)]
+    results = [audit_contact_result(session, contact) for contact in matches[: max(1, limit)]]
+    return {
+        "success": True,
+        "query": query,
+        "google_fetched": len(people),
+        "google_parsed": len(parsed),
+        "google_matches": len(matches),
+        "visible_contacts": len(session.exec(select(Contact).where(Contact.active == True)).all()),  # noqa: E712
+        "total_contacts": len(session.exec(select(Contact)).all()),
+        "results": results,
+    }
+
+
 def sync_single_google_contact(session: Session, contact_id: int, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
     contact = session.get(Contact, contact_id)
     if not contact:

@@ -1408,6 +1408,7 @@ function renderContacts() {
         <div class="inline-actions">
           <button class="secondary-button" data-action="sync-icloud-contacts">Sync iCloud</button>
           <button class="secondary-button" data-action="sync-google-contacts">Sync Google</button>
+          <button class="secondary-button" data-action="audit-google-contacts">Audit Google</button>
           <button class="secondary-button" data-action="push-google-contacts">Push Google</button>
           <button class="secondary-button" data-action="import-contacts">Import</button>
           <button class="secondary-button" data-action="export-contacts">Export</button>
@@ -1609,6 +1610,45 @@ async function syncGoogleContacts() {
     }
     const detail = diagnostics.length ? `\n\n${diagnostics.join("\n")}` : "";
     window.alert(`Google sync complete.\nCreated: ${result.created}\nUpdated rows: ${result.updated}\nSkipped: ${result.skipped}${detail}`);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+function googleAuditSummary(result) {
+  const lines = [
+    `Google fetched: ${result.google_fetched}`,
+    `Google parsed: ${result.google_parsed}`,
+    `Visible GPA contacts: ${result.visible_contacts}`,
+    `Google matches for search: ${result.google_matches}`,
+  ];
+  if (!result.results?.length) {
+    lines.push("No Google contact matched this search.");
+    return lines.join("\n");
+  }
+  result.results.forEach((item, index) => {
+    lines.push("");
+    lines.push(`${index + 1}. ${item.google.name || "Unnamed Google contact"}`);
+    lines.push(`Status: ${item.status}`);
+    lines.push(`Reason: ${item.reason}`);
+    lines.push(`Google phone/email: ${item.google.phone || "-"} / ${item.google.email || "-"}`);
+    lines.push(`GPA contact: ${item.gpa.name || "-"}${item.gpa.id ? ` (#${item.gpa.id})` : ""}`);
+    lines.push(`GPA phone/email: ${item.gpa.phone || item.gpa.whatsapp || "-"} / ${item.gpa.email || "-"}`);
+  });
+  return lines.join("\n");
+}
+
+async function auditGoogleContacts() {
+  const query = window.prompt("Enter missing contact name, phone, or email to audit in Google Contacts:");
+  if (query === null) return;
+  const cleanQuery = query.trim();
+  if (!cleanQuery) {
+    window.alert("Please enter a name, phone, or email.");
+    return;
+  }
+  try {
+    const result = await api(`${API_CONTACTS_URL}/audit/google?query=${encodeURIComponent(cleanQuery)}`);
+    window.alert(googleAuditSummary(result));
   } catch (error) {
     window.alert(error.message);
   }
@@ -2900,6 +2940,10 @@ function bindEvents() {
     }
     if (target.dataset.action === "sync-google-contacts") {
       syncGoogleContacts();
+      return;
+    }
+    if (target.dataset.action === "audit-google-contacts") {
+      auditGoogleContacts();
       return;
     }
     if (target.dataset.action === "push-google-contacts") {
