@@ -174,7 +174,7 @@ def parse_google_person(person: dict) -> ParsedGoogleContact | None:
     birthdays = person.get("birthdays") or []
     events = person.get("events") or []
     relations = person.get("relations") or []
-    if not name or (not phone and not email):
+    if not name:
         return None
     return ParsedGoogleContact(
         name=name,
@@ -377,8 +377,13 @@ def create_google_contact(access_token: str, contact: Contact) -> dict:
 
 def sync_google_contacts(session: Session, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
     credentials = load_google_credentials(credentials_path)
-    parsed = [contact for contact in (parse_google_person(person) for person in fetch_google_people(credentials)) if contact]
-    return upsert_google_contacts(session, parsed, dry_run=dry_run)
+    people = fetch_google_people(credentials)
+    parsed = [contact for contact in (parse_google_person(person) for person in people) if contact]
+    result = upsert_google_contacts(session, parsed, dry_run=dry_run)
+    result["google_fetched"] = len(people)
+    result["google_parsed"] = len(parsed)
+    result["google_unparseable"] = len(people) - len(parsed)
+    return result
 
 
 def sync_single_google_contact(session: Session, contact_id: int, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
@@ -386,7 +391,8 @@ def sync_single_google_contact(session: Session, contact_id: int, dry_run: bool 
     if not contact:
         return {"success": False, "created": 0, "updated": 0, "skipped": 1, "total": 0, "dry_run": dry_run, "message": "Contact not found"}
     credentials = load_google_credentials(credentials_path)
-    parsed = [item for item in (parse_google_person(person) for person in fetch_google_people(credentials)) if item]
+    people = fetch_google_people(credentials)
+    parsed = [item for item in (parse_google_person(person) for person in people) if item]
     match = next((item for item in parsed if item.google_resource_name and item.google_resource_name == contact.google_resource_name), None)
     if not match and (contact.phone or contact.whatsapp):
         numbers = {value for value in (contact.phone, contact.whatsapp) if value}

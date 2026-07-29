@@ -1598,7 +1598,8 @@ async function syncGoogleContacts() {
     await loadContacts();
     await loadActivity();
     render();
-    window.alert(`Google sync complete. Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}`);
+    const detail = result.google_fetched !== undefined ? `, Google fetched: ${result.google_fetched}, Parsed: ${result.google_parsed}, Unreadable: ${result.google_unparseable}` : "";
+    window.alert(`Google sync complete. Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}${detail}`);
   } catch (error) {
     window.alert(error.message);
   }
