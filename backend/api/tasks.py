@@ -383,21 +383,29 @@ def normalized_name(value: str) -> str:
     return " ".join((value or "").strip().split()).casefold()
 
 
-def find_duplicate_by_name(session: Session, model, name: str, exclude_id: int | None = None):
+def is_active_record(item) -> bool:
+    return bool(getattr(item, "active", True))
+
+
+def find_duplicate_by_name(session: Session, model, name: str, exclude_id: int | None = None, active_only: bool = False):
     target = normalized_name(name)
     for item in session.exec(select(model)).all():
         if exclude_id is not None and item.id == exclude_id:
+            continue
+        if active_only and not is_active_record(item):
             continue
         if normalized_name(item.name) == target:
             return item
     return None
 
 
-def find_duplicate_by_any_field(session: Session, model, fields: list[str], value: str, exclude_id: int | None = None):
+def find_duplicate_by_any_field(session: Session, model, fields: list[str], value: str, exclude_id: int | None = None, active_only: bool = False):
     if not value:
         return None
     for item in session.exec(select(model)).all():
         if exclude_id is not None and item.id == exclude_id:
+            continue
+        if active_only and not is_active_record(item):
             continue
         if any(getattr(item, field, "") == value for field in fields):
             return item
@@ -405,7 +413,7 @@ def find_duplicate_by_any_field(session: Session, model, fields: list[str], valu
 
 
 def ensure_unique_people_fields(session: Session, model, data: dict, label: str, exclude_id: int | None = None):
-    duplicate = find_duplicate_by_name(session, model, data["name"], exclude_id=exclude_id)
+    duplicate = find_duplicate_by_name(session, model, data["name"], exclude_id=exclude_id, active_only=True)
     if duplicate:
         raise HTTPException(status_code=400, detail=f"{label} name already exists: {duplicate.name}")
     checks = [
@@ -414,20 +422,20 @@ def ensure_unique_people_fields(session: Session, model, data: dict, label: str,
         (["email"], "Email", data.get("email", "")),
     ]
     for fields, field_label, value in checks:
-        duplicate = find_duplicate_by_any_field(session, model, fields, value, exclude_id=exclude_id)
+        duplicate = find_duplicate_by_any_field(session, model, fields, value, exclude_id=exclude_id, active_only=True)
         if duplicate:
             raise HTTPException(status_code=400, detail=f"{field_label} already exists in {label.lower()}: {duplicate.name}")
 
 
-def find_person_by_identity(session: Session, model, data: dict):
-    existing = find_duplicate_by_name(session, model, data.get("name", ""))
+def find_person_by_identity(session: Session, model, data: dict, active_only: bool = False):
+    existing = find_duplicate_by_name(session, model, data.get("name", ""), active_only=active_only)
     if existing:
         return existing
     for value in (data.get("phone", ""), data.get("whatsapp", "")):
-        existing = find_duplicate_by_any_field(session, model, ["phone", "whatsapp"], value)
+        existing = find_duplicate_by_any_field(session, model, ["phone", "whatsapp"], value, active_only=active_only)
         if existing:
             return existing
-    return find_duplicate_by_any_field(session, model, ["email"], data.get("email", ""))
+    return find_duplicate_by_any_field(session, model, ["email"], data.get("email", ""), active_only=active_only)
 
 
 def master_usage_counts(session: Session, master_type: str, name: str) -> list[tuple[str, int]]:
@@ -1295,6 +1303,17 @@ def get_contacts(include_inactive: bool = False, session: Session = Depends(get_
 def create_contact(contact_data: ContactCreate, session: Session = Depends(get_session)):
     data = normalize_contact_data(contact_data)
     ensure_unique_people_fields(session, Contact, data, "Contact")
+    inactive_contact = find_person_by_identity(session, Contact, data)
+    if inactive_contact and not inactive_contact.active:
+        for field, value in data.items():
+            setattr(inactive_contact, field, value)
+        inactive_contact.active = True
+        inactive_contact.updated_at = now()
+        session.add(inactive_contact)
+        log_activity(session, "RESTORED", "contact", f"Restored contact: {inactive_contact.name}", inactive_contact.id)
+        session.commit()
+        session.refresh(inactive_contact)
+        return inactive_contact
     contact = Contact(**data, updated_at=now())
     session.add(contact)
     session.flush()

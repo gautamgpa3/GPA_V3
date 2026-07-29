@@ -222,6 +222,8 @@ def contact_conflict(session: Session, contact: ParsedGoogleContact, exclude_id:
     for existing in contacts:
         if exclude_id is not None and existing.id == exclude_id:
             continue
+        if not existing.active:
+            continue
         if contact.phone and contact.phone in {existing.phone, existing.whatsapp}:
             return existing
         if contact.email and existing.email and contact.email == existing.email:
