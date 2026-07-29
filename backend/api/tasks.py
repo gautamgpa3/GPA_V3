@@ -18,6 +18,7 @@ from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
 from backend.services.google_contacts import audit_google_contacts, push_gpa_contacts_to_google, sync_google_contacts, sync_single_google_contact
 from backend.services.icloud_contacts import sync_icloud_contacts
+from backend.services.whatsapp_business import send_whatsapp_text, whatsapp_settings
 
 router = APIRouter(prefix="/api", tags=["Tasks"])
 
@@ -776,6 +777,91 @@ def birthday_message_text(session: Session, client: Client) -> str:
     }
     values["birth_date"] = values["client_birth_date"]
     return render_template(template, values)
+
+
+def task_template_values(task: Task, client: Client | None, update_details: str = "") -> dict[str, object]:
+    values = {
+        "task_id": task.id or "",
+        "task_uuid": task.uuid,
+        "task_title": task.title,
+        "task_description": task.description,
+        "task_category": task.category,
+        "task_priority": task.priority,
+        "task_status": task.status,
+        "task_time": task.task_time,
+        "task_topic": task.topic,
+        "task_start_date": template_date(task.start_date),
+        "task_due_date": template_date(task.due_date),
+        "task_owner": task.owner,
+        "task_issue": task.issue,
+        "task_notes": task.notes,
+        "task_created_at": template_date(task.created_at),
+        "task_updated_at": template_date(task.updated_at),
+        "task_completed_at": template_date(task.completed_at),
+        "update_details": update_details,
+    }
+    if client:
+        values.update(client_template_values(client))
+    else:
+        values.update(
+            {
+                "client_name": "",
+                "client_category": "",
+                "client_phone": "",
+                "client_whatsapp": "",
+                "client_email": "",
+                "client_address": "",
+                "client_gst_no": "",
+                "client_work_scope": "",
+                "client_birth_date": "",
+                "client_notes": "",
+                "birth_date": "",
+            }
+        )
+    return values
+
+
+def task_stage_message_text(session: Session, task: Task, stage: str, update_details: str = "") -> str:
+    fallback_by_stage = {
+        "created": "Hello {client_name}, your work of {task_title} is received and we are working on it. We will update you on the progress.",
+        "updated": "Hello {client_name}, update for {task_title}: {update_details}.",
+        "completed": "Hello {client_name}, your work of {task_title} has been completed.",
+    }
+    client = session.get(Client, task.client_id) if task.client_id else None
+    template = message_template_body(session, f"task_{stage}", fallback_by_stage[stage])
+    values = task_template_values(task, client, update_details)
+    return render_template(template, values)
+
+
+def send_task_stage_whatsapp(session: Session, task: Task, stage: str, update_details: str = ""):
+    client = session.get(Client, task.client_id) if task.client_id else None
+    if not client:
+        return
+    settings = whatsapp_settings()
+    if not settings.auto_send:
+        return
+    message = task_stage_message_text(session, task, stage, update_details)
+    result = send_whatsapp_text(client.whatsapp or client.phone, message, settings)
+    if result.get("success"):
+        log_activity(
+            session,
+            "WHATSAPP_SENT",
+            "task",
+            f"WhatsApp sent to {client.name}: {task.title}",
+            task.id,
+            task.uuid,
+            result.get("message_id", ""),
+        )
+        return
+    log_activity(
+        session,
+        "WHATSAPP_FAILED" if not result.get("skipped") else "WHATSAPP_SKIPPED",
+        "task",
+        f"WhatsApp not sent to {client.name}: {task.title}",
+        task.id,
+        task.uuid,
+        result.get("reason", ""),
+    )
 
 
 def parse_assistant_date(text: str) -> date:
@@ -1575,6 +1661,7 @@ def create_task(task_data: TaskCreate, session: Session = Depends(get_session)):
     session.add(task)
     session.flush()
     log_activity(session, "CREATED", "task", f"Added task: {task.title}", task.id, task.uuid)
+    send_task_stage_whatsapp(session, task, "created")
     session.commit()
     session.refresh(task)
     return task
@@ -1588,6 +1675,9 @@ def update_task(task_id: int, task_data: TaskUpdate, session: Session = Depends(
     task, changes = apply_normalized_task_data(current_task, data)
     session.add(task)
     log_activity(session, "UPDATED", "task", f"Updated task: {task.title}", task.id, task.uuid, changes or "No field changes")
+    if changes:
+        stage = "completed" if task.status == "Completed" else "updated"
+        send_task_stage_whatsapp(session, task, stage, changes)
     session.commit()
     session.refresh(task)
     return task
@@ -1602,6 +1692,7 @@ def complete_task(task_id: int, session: Session = Depends(get_session)):
         task.updated_at = now()
         session.add(task)
         log_activity(session, "COMPLETED", "task", f"Completed task: {task.title}", task.id, task.uuid)
+        send_task_stage_whatsapp(session, task, "completed")
         next_task = create_next_occurrence(task)
         if next_task:
             session.add(next_task)

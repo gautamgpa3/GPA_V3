@@ -24,6 +24,8 @@ contact_sync_credentials.txt
 icloud_contacts.env
 google_contacts.env
 google_contacts_credentials.txt
+whatsapp_business.env
+whatsapp_business_credentials.txt
 
 # OS
 Thumbs.db

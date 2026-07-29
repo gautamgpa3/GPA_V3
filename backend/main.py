@@ -10,6 +10,7 @@ from backend.core.config import APP_NAME, APP_VERSION
 from backend.core.auth import check_login, clear_login_cookie, ensure_auth_file, is_authenticated, set_login_cookie
 from backend.database.engine import create_db
 from backend.api.tasks import router as task_router
+from backend.api.webhooks import router as webhook_router
 
 
 @asynccontextmanager
@@ -26,6 +27,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(task_router)
+app.include_router(webhook_router)
 
 
 class LoginRequest(BaseModel):

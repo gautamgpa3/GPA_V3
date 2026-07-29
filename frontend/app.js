@@ -2551,6 +2551,11 @@ function checkNotificationHints() {
   localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...settings, lastNotificationDate: todayISO() }));
 }
 
+function registerServiceWorker() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) return;
+  navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+}
+
 function csvCell(value) {
   return `"${String(value ?? "").replace(/"/g, '""')}"`;
 }
@@ -3055,6 +3060,7 @@ function bindEvents() {
 async function startApp() {
   try {
     showApp();
+    registerServiceWorker();
     await loadMasterData();
     await loadMessageTemplates();
     await loadClients();
