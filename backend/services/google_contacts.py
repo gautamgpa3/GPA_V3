@@ -253,6 +253,8 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
     created = 0
     updated = 0
     skipped = 0
+    updated_contact_ids: set[int] = set()
+    merged_google_contacts = 0
     for item in contacts:
         existing = find_google_match(session, item)
         if existing:
@@ -260,6 +262,10 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
             if conflict:
                 skipped += 1
                 continue
+            if existing.id in updated_contact_ids:
+                merged_google_contacts += 1
+            elif existing.id is not None:
+                updated_contact_ids.add(existing.id)
             if not dry_run:
                 existing.name = item.name or existing.name
                 existing.first_name = item.first_name
@@ -324,7 +330,18 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
             )
         )
         session.commit()
-    return {"success": True, "created": created, "updated": updated, "skipped": skipped, "total": len(contacts), "dry_run": dry_run}
+    active_contacts = len(session.exec(select(Contact).where(Contact.active == True)).all())  # noqa: E712
+    return {
+        "success": True,
+        "created": created,
+        "updated": updated,
+        "updated_contacts": len(updated_contact_ids),
+        "merged_google_contacts": merged_google_contacts,
+        "skipped": skipped,
+        "visible_contacts": active_contacts,
+        "total": len(contacts),
+        "dry_run": dry_run,
+    }
 
 
 def google_person_date(value: date | None) -> dict | None:

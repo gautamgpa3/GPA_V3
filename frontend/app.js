@@ -1598,8 +1598,17 @@ async function syncGoogleContacts() {
     await loadContacts();
     await loadActivity();
     render();
-    const detail = result.google_fetched !== undefined ? `, Google fetched: ${result.google_fetched}, Parsed: ${result.google_parsed}, Unreadable: ${result.google_unparseable}` : "";
-    window.alert(`Google sync complete. Created: ${result.created}, Updated: ${result.updated}, Skipped: ${result.skipped}${detail}`);
+    const diagnostics = [];
+    if (result.visible_contacts !== undefined) diagnostics.push(`Visible GPA contacts: ${result.visible_contacts}`);
+    if (result.updated_contacts !== undefined) diagnostics.push(`Unique updated contacts: ${result.updated_contacts}`);
+    if (result.merged_google_contacts !== undefined) diagnostics.push(`Merged duplicate Google rows: ${result.merged_google_contacts}`);
+    if (result.google_fetched !== undefined) {
+      diagnostics.push(`Google fetched: ${result.google_fetched}`);
+      diagnostics.push(`Parsed: ${result.google_parsed}`);
+      diagnostics.push(`Unreadable: ${result.google_unparseable}`);
+    }
+    const detail = diagnostics.length ? `\n\n${diagnostics.join("\n")}` : "";
+    window.alert(`Google sync complete.\nCreated: ${result.created}\nUpdated rows: ${result.updated}\nSkipped: ${result.skipped}${detail}`);
   } catch (error) {
     window.alert(error.message);
   }
