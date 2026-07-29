@@ -413,6 +413,17 @@ def ensure_unique_people_fields(session: Session, model, data: dict, label: str,
             raise HTTPException(status_code=400, detail=f"{field_label} already exists in {label.lower()}: {duplicate.name}")
 
 
+def find_person_by_identity(session: Session, model, data: dict):
+    existing = find_duplicate_by_name(session, model, data.get("name", ""))
+    if existing:
+        return existing
+    for value in (data.get("phone", ""), data.get("whatsapp", "")):
+        existing = find_duplicate_by_any_field(session, model, ["phone", "whatsapp"], value)
+        if existing:
+            return existing
+    return find_duplicate_by_any_field(session, model, ["email"], data.get("email", ""))
+
+
 def master_usage_counts(session: Session, master_type: str, name: str) -> list[tuple[str, int]]:
     counts = []
     for model, field in MASTER_USAGE.get(master_type, []):
@@ -1327,15 +1338,16 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         raise HTTPException(status_code=404, detail="Contact not found")
     if not contact.phone and not contact.whatsapp:
         raise HTTPException(status_code=400, detail="Contact must have a phone or WhatsApp number before creating client")
-    client = find_duplicate_by_name(session, Client, contact.name)
+    data = {
+        "name": contact.name,
+        "phone": contact.phone or contact.whatsapp,
+        "whatsapp": contact.whatsapp,
+        "email": contact.email,
+    }
+    client = find_person_by_identity(session, Client, data)
     if client:
-        data = {
-            "name": contact.name,
-            "phone": contact.phone or contact.whatsapp,
-            "whatsapp": contact.whatsapp,
-            "email": contact.email,
-        }
         ensure_unique_people_fields(session, Client, data, "Client", exclude_id=client.id)
+        client.name = contact.name
         client.phone = contact.phone or contact.whatsapp
         client.whatsapp = contact.whatsapp
         client.email = contact.email
@@ -1347,12 +1359,6 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         session.add(client)
         log_activity(session, "UPDATED", "client", f"Updated client from contact: {client.name}", client.id)
     else:
-        data = {
-            "name": contact.name,
-            "phone": contact.phone or contact.whatsapp,
-            "whatsapp": contact.whatsapp,
-            "email": contact.email,
-        }
         ensure_unique_people_fields(session, Client, data, "Client")
         client = Client(
             name=contact.name,
