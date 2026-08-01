@@ -54,7 +54,11 @@ ACTIVITY_COLUMNS = {
 }
 
 CLIENT_COLUMNS = {
+    "constitution": "TEXT DEFAULT 'Individual'",
     "category": "TEXT DEFAULT 'Client'",
+    "pan_no": "TEXT DEFAULT ''",
+    "contact_id": "INTEGER",
+    "contact_role": "TEXT DEFAULT ''",
     "email": "TEXT DEFAULT ''",
     "birth_date": "DATE",
 }
@@ -66,6 +70,7 @@ CONTACT_COLUMNS = {
     "phone_label": "TEXT DEFAULT 'Mobile'",
     "whatsapp": "TEXT DEFAULT ''",
     "whatsapp_label": "TEXT DEFAULT 'WhatsApp'",
+    "pan_no": "TEXT DEFAULT ''",
     "email": "TEXT DEFAULT ''",
     "company": "TEXT DEFAULT ''",
     "address": "TEXT DEFAULT ''",
@@ -159,6 +164,9 @@ def migrate_client_table():
             if column not in existing:
                 connection.execute(text(f"ALTER TABLE clients ADD COLUMN {column} {definition}"))
         connection.execute(text("UPDATE clients SET category = 'Client' WHERE category IS NULL OR category = '' OR category = 'General'"))
+        connection.execute(text("UPDATE clients SET constitution = 'Individual' WHERE constitution IS NULL OR constitution = ''"))
+        connection.execute(text("UPDATE clients SET pan_no = '' WHERE pan_no IS NULL"))
+        connection.execute(text("UPDATE clients SET contact_role = '' WHERE contact_role IS NULL"))
 
 
 def migrate_contact_table():
@@ -176,6 +184,7 @@ def migrate_contact_table():
         connection.execute(text("UPDATE contacts SET phone_label = 'Mobile' WHERE phone_label IS NULL OR phone_label = ''"))
         connection.execute(text("UPDATE contacts SET whatsapp = '' WHERE whatsapp IS NULL"))
         connection.execute(text("UPDATE contacts SET whatsapp_label = 'WhatsApp' WHERE whatsapp_label IS NULL OR whatsapp_label = ''"))
+        connection.execute(text("UPDATE contacts SET pan_no = '' WHERE pan_no IS NULL"))
         connection.execute(text("UPDATE contacts SET email = '' WHERE email IS NULL"))
         connection.execute(text("UPDATE contacts SET company = '' WHERE company IS NULL"))
         connection.execute(text("UPDATE contacts SET address = '' WHERE address IS NULL"))

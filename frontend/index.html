@@ -226,13 +226,39 @@
             <span>Name</span>
             <input id="clientName" required maxlength="200" />
           </label>
+          <label>
+            <span>Constitution</span>
+            <select id="clientConstitution" required>
+              <option>Individual</option>
+              <option>Proprietorship</option>
+              <option>Partnership Firm</option>
+              <option>LLP</option>
+              <option>Company</option>
+              <option>HUF</option>
+              <option>AOP</option>
+              <option>Trust</option>
+              <option>Society</option>
+            </select>
+          </label>
           <div class="field-block">
             <div class="field-head"><span>Category</span><button class="inline-link" id="quickAddClientCategoryBtn" type="button">Add</button></div>
             <select id="clientCategory" required></select>
           </div>
           <label>
+            <span>PAN No.</span>
+            <input id="clientPan" maxlength="10" pattern="[A-Z]{5}[0-9]{4}[A-Z]" placeholder="AAAAA0000A" autocapitalize="characters" spellcheck="false" title="Enter a valid 10-character PAN" />
+          </label>
+          <div class="field-block">
+            <div class="field-head"><span>Primary contact</span><button class="inline-link" id="quickAddClientContactBtn" type="button">Add</button></div>
+            <select id="clientContact"></select>
+          </div>
+          <label>
+            <span>Contact role</span>
+            <input id="clientContactRole" maxlength="80" placeholder="Self, Partner, Director, Trustee..." />
+          </label>
+          <label>
             <span>Mobile / SMS</span>
-            <input id="clientPhone" required inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
+            <input id="clientPhone" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
           </label>
           <label>
             <span>WhatsApp</span>
@@ -311,6 +337,10 @@
           <label>
             <span>WhatsApp</span>
             <input id="contactWhatsapp" inputmode="numeric" autocomplete="tel" maxlength="10" pattern="[0-9]{10}" title="Enter exactly 10 digits" />
+          </label>
+          <label>
+            <span>PAN No.</span>
+            <input id="contactPan" maxlength="10" pattern="[A-Z]{5}[0-9]{4}[A-Z]" placeholder="AAAAA0000A" autocapitalize="characters" spellcheck="false" title="Enter a valid 10-character PAN" />
           </label>
           <label>
             <span>Email</span>

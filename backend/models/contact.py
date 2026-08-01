@@ -15,6 +15,7 @@ class Contact(SQLModel, table=True):
     phone_label: str = "Mobile"
     whatsapp: str = ""
     whatsapp_label: str = "WhatsApp"
+    pan_no: str = ""
     email: str = ""
     company: str = ""
     address: str = ""

@@ -9,7 +9,11 @@ class Client(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)
+    constitution: str = "Individual"
     category: str = "Client"
+    pan_no: str = ""
+    contact_id: Optional[int] = None
+    contact_role: str = ""
     phone: str = ""
     whatsapp: str = ""
     email: str = ""

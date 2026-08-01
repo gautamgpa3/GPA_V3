@@ -80,8 +80,12 @@ class MasterItemUpdate(BaseModel):
 
 class ClientBase(BaseModel):
     name: str = Field(min_length=1, max_length=200)
+    constitution: str = "Individual"
     category: str = "Client"
-    phone: str = Field(min_length=1, max_length=40)
+    pan_no: str = ""
+    contact_id: int | None = None
+    contact_role: str = ""
+    phone: str = Field(default="", max_length=40)
     whatsapp: str = ""
     email: str = ""
     address: str = ""
@@ -112,6 +116,7 @@ class ContactBase(BaseModel):
     phone_label: str = Field(default="Mobile", max_length=40)
     whatsapp: str = ""
     whatsapp_label: str = Field(default="WhatsApp", max_length=40)
+    pan_no: str = ""
     email: str = ""
     company: str = ""
     address: str = ""
@@ -545,6 +550,19 @@ def normalize_gst_no(value: str) -> str:
     return gst_no
 
 
+CONSTITUTIONS_REQUIRING_CONTACT = {"Partnership Firm", "Company", "HUF", "AOP", "Trust", "LLP", "Society"}
+VALID_CONSTITUTIONS = {"Individual", "Proprietorship", *CONSTITUTIONS_REQUIRING_CONTACT}
+
+
+def normalize_pan_no(value: str, label: str = "PAN No.") -> str:
+    pan_no = sub(r"[^A-Za-z0-9]", "", value or "").upper()
+    if not pan_no:
+        return ""
+    if not fullmatch(r"^[A-Z]{5}[0-9]{4}[A-Z]$", pan_no):
+        raise HTTPException(status_code=400, detail=f"{label} must be a valid 10-character PAN")
+    return pan_no
+
+
 def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Session) -> dict:
     data = client_data.model_dump()
     for key, value in data.items():
@@ -553,11 +571,21 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Ses
     data["name"] = " ".join(data["name"].split())
     if not data["name"]:
         raise HTTPException(status_code=400, detail="Client name is required")
+    data["constitution"] = " ".join((data["constitution"] or "Individual").split())
+    if data["constitution"] not in VALID_CONSTITUTIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid constitution: {data['constitution']}")
     data["category"] = data["category"] or "Client"
+    data["contact_role"] = " ".join((data["contact_role"] or "").split())
     ensure_master_value(session, Category, data["category"], "category")
-    data["phone"] = normalize_phone_number(data["phone"], "Mobile / SMS", required=True)
+    linked_contact = session.get(Contact, data["contact_id"]) if data["contact_id"] is not None else None
+    if data["contact_id"] is not None and (not linked_contact or not linked_contact.active):
+        raise HTTPException(status_code=400, detail="Selected primary contact does not exist")
+    if data["constitution"] in CONSTITUTIONS_REQUIRING_CONTACT and not linked_contact:
+        raise HTTPException(status_code=400, detail=f"{data['constitution']} client must be linked with a primary contact")
+    data["phone"] = normalize_phone_number(data["phone"], "Mobile / SMS", required=data["constitution"] == "Individual")
     data["whatsapp"] = normalize_phone_number(data["whatsapp"], "WhatsApp")
     data["email"] = normalize_email(data["email"])
+    data["pan_no"] = normalize_pan_no(data["pan_no"], "Client PAN No.")
     data["gst_no"] = normalize_gst_no(data["gst_no"])
     validate_date_range(data["birth_date"], "Birth date", 1900, 2100)
     return data
@@ -593,6 +621,7 @@ def normalize_contact_data(contact_data: ContactCreate | ContactUpdate) -> dict:
     data["whatsapp_label"] = data["whatsapp_label"] or "WhatsApp"
     data["phone"] = normalize_optional_phone_number(data["phone"], data["phone_label"])
     data["whatsapp"] = normalize_optional_phone_number(data["whatsapp"], data["whatsapp_label"])
+    data["pan_no"] = normalize_pan_no(data["pan_no"], "Contact PAN No.")
     data["email"] = normalize_email(data["email"])
     data["location_url"] = normalize_url(data["location_url"], "Location URL")
     data["social_profile"] = normalize_url(data["social_profile"], "Social profile")
@@ -655,7 +684,11 @@ def template_date(value: date | datetime | None) -> str:
 def client_template_values(client: Client) -> dict[str, object]:
     return {
         "client_name": client.name,
+        "client_constitution": client.constitution,
         "client_category": client.category,
+        "client_pan_no": client.pan_no,
+        "client_contact_id": client.contact_id or "",
+        "client_contact_role": client.contact_role,
         "client_phone": client.phone,
         "client_whatsapp": client.whatsapp,
         "client_email": client.email,
@@ -676,6 +709,7 @@ def empty_contact_template_values() -> dict[str, object]:
         "contact_phone": "",
         "contact_phone_label": "",
         "contact_whatsapp": "",
+        "contact_pan_no": "",
         "contact_email": "",
         "contact_company": "",
         "contact_address": "",
@@ -701,6 +735,7 @@ def contact_template_values(contact: Contact | None) -> dict[str, object]:
             "contact_phone": contact.phone,
             "contact_phone_label": contact.phone_label,
             "contact_whatsapp": contact.whatsapp,
+            "contact_pan_no": contact.pan_no,
             "contact_email": contact.email,
             "contact_company": contact.company,
             "contact_address": contact.address,
@@ -725,6 +760,10 @@ def normalized_phone_value(value: str | None) -> str:
 
 
 def contact_for_client(session: Session, client: Client) -> Contact | None:
+    if client.contact_id:
+        contact = session.get(Contact, client.contact_id)
+        if contact and contact.active:
+            return contact
     client_name = normalized_match_value(client.name)
     client_email = normalized_match_value(client.email)
     client_numbers = {normalized_phone_value(phone_number) for phone_number in (client.phone, client.whatsapp) if phone_number}
@@ -738,6 +777,13 @@ def contact_for_client(session: Session, client: Client) -> Contact | None:
         if contact_numbers.intersection(client_numbers):
             return contact
     return None
+
+
+def client_message_phone(session: Session, client: Client, channel: str = "whatsapp") -> str:
+    contact = contact_for_client(session, client)
+    if channel == "whatsapp":
+        return client.whatsapp or (contact.whatsapp if contact else "") or client.phone or (contact.phone if contact else "")
+    return client.phone or (contact.phone if contact else "") or client.whatsapp or (contact.whatsapp if contact else "")
 
 
 def schedule_client_ids(schedule: ClientMessageSchedule) -> list[int]:
@@ -853,7 +899,11 @@ def task_template_values(task: Task, client: Client | None, update_details: str 
         values.update(
             {
                 "client_name": "",
+                "client_constitution": "",
                 "client_category": "",
+                "client_pan_no": "",
+                "client_contact_id": "",
+                "client_contact_role": "",
                 "client_phone": "",
                 "client_whatsapp": "",
                 "client_email": "",
@@ -888,7 +938,7 @@ def send_task_stage_whatsapp(session: Session, task: Task, stage: str, update_de
     if not settings.auto_send:
         return
     message = task_stage_message_text(session, task, stage, update_details)
-    result = send_whatsapp_text(client.whatsapp or client.phone, message, settings)
+    result = send_whatsapp_text(client_message_phone(session, client, "whatsapp"), message, settings)
     if result.get("success"):
         log_activity(
             session,
@@ -1518,17 +1568,33 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
     client = session.get(Client, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    if client.contact_id:
+        contact = session.get(Contact, client.contact_id)
+        if not contact:
+            raise HTTPException(status_code=400, detail="Linked contact does not exist")
+        contact.company = client.name
+        contact.address = contact.address or client.address
+        contact.notes = contact.notes or client.notes
+        contact.active = True
+        contact.updated_at = now()
+        session.add(contact)
+        log_activity(session, "UPDATED", "contact", f"Updated linked contact from client: {contact.name}", contact.id)
+        session.commit()
+        session.refresh(contact)
+        return contact
     contact = find_duplicate_by_name(session, Contact, client.name)
     if contact:
         data = {
             "name": client.name,
             "phone": client.phone,
             "whatsapp": client.whatsapp,
+            "pan_no": client.pan_no,
             "email": client.email,
         }
         ensure_unique_people_fields(session, Contact, data, "Contact", exclude_id=contact.id)
         contact.phone = client.phone
         contact.whatsapp = client.whatsapp
+        contact.pan_no = client.pan_no
         contact.email = client.email
         contact.company = client.work_scope
         contact.address = client.address
@@ -1542,6 +1608,7 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
             "name": client.name,
             "phone": client.phone,
             "whatsapp": client.whatsapp,
+            "pan_no": client.pan_no,
             "email": client.email,
         }
         ensure_unique_people_fields(session, Contact, data, "Contact")
@@ -1549,6 +1616,7 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
             name=client.name,
             phone=client.phone,
             whatsapp=client.whatsapp,
+            pan_no=client.pan_no,
             email=client.email,
             company=client.work_scope,
             address=client.address,
@@ -1652,6 +1720,10 @@ def delete_contact(contact_id: int, session: Session = Depends(get_session)):
     contact = session.get(Contact, contact_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
+    linked_by_contact_id = session.exec(select(Client).where(Client.contact_id == contact.id, Client.active == True)).all()  # noqa: E712
+    if linked_by_contact_id:
+        names = ", ".join(client.name for client in linked_by_contact_id[:3])
+        raise HTTPException(status_code=400, detail=f"Cannot delete this contact because it is linked with client(s): {names}.")
     linked_client = find_duplicate_by_name(session, Client, contact.name)
     if not linked_client:
         linked_client = find_duplicate_by_any_field(session, Client, ["phone", "whatsapp"], contact.phone or contact.whatsapp)
@@ -1841,6 +1913,7 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         "name": contact.name,
         "phone": contact.phone or contact.whatsapp,
         "whatsapp": contact.whatsapp,
+        "pan_no": contact.pan_no,
         "email": contact.email,
     }
     client = find_person_by_identity(session, Client, data)
@@ -1849,7 +1922,11 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         client.name = contact.name
         client.phone = contact.phone or contact.whatsapp
         client.whatsapp = contact.whatsapp
+        client.pan_no = contact.pan_no
         client.email = contact.email
+        client.constitution = "Individual"
+        client.contact_id = contact.id
+        client.contact_role = "Self"
         client.address = contact.address
         client.work_scope = contact.company
         client.notes = contact.notes
@@ -1861,7 +1938,11 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         ensure_unique_people_fields(session, Client, data, "Client")
         client = Client(
             name=contact.name,
+            constitution="Individual",
             category="Client",
+            pan_no=contact.pan_no,
+            contact_id=contact.id,
+            contact_role="Self",
             phone=contact.phone or contact.whatsapp,
             whatsapp=contact.whatsapp,
             email=contact.email,
@@ -1932,7 +2013,7 @@ def get_due_client_messages(session: Session = Depends(get_session)):
     for client in active_clients:
         if not client.birth_date or client.birth_date.month != at_time.month or client.birth_date.day != at_time.day:
             continue
-        phone = client.whatsapp or client.phone
+        phone = client_message_phone(session, client, "whatsapp")
         message = birthday_message_text(session, client)
         if not phone or not message:
             continue
@@ -1956,7 +2037,7 @@ def get_due_client_messages(session: Session = Depends(get_session)):
         clients = active_clients if schedule.audience == "all" else [client for client in active_clients if client.id in selected_ids]
         for client in clients:
             message = client_message_text(session, client, schedule.message_type)
-            phone = client.whatsapp or client.phone if schedule.channel == "whatsapp" else client.phone
+            phone = client_message_phone(session, client, schedule.channel)
             if not message or not phone:
                 continue
             due_messages.append(

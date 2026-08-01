@@ -13,6 +13,7 @@ const API_AUTH_LOGIN_URL = "/api/auth/login";
 const API_AUTH_LOGOUT_URL = "/api/auth/logout";
 const SETTINGS_KEY = "gpa-v3-settings";
 const LOCAL_TIME_ZONE = "Asia/Kolkata";
+const ORGANIZATION_CONSTITUTIONS = new Set(["Partnership Firm", "LLP", "Company", "HUF", "AOP", "Trust", "Society"]);
 
 const state = {
   tasks: [],
@@ -29,6 +30,7 @@ const state = {
   resumeTaskAfterClient: false,
   resumeTaskAfterMasterType: "",
   resumeClientAfterMasterType: "",
+  resumeClientAfterContact: false,
   dashboardMetric: "",
   dashboardExpanded: "",
   master: {
@@ -81,6 +83,7 @@ const els = {
   logoutBtn: document.querySelector("#logoutBtn"),
   quickAddClientBtn: document.querySelector("#quickAddClientBtn"),
   quickAddClientCategoryBtn: document.querySelector("#quickAddClientCategoryBtn"),
+  quickAddClientContactBtn: document.querySelector("#quickAddClientContactBtn"),
   quickAddPriorityBtn: document.querySelector("#quickAddPriorityBtn"),
   quickAddStatusBtn: document.querySelector("#quickAddStatusBtn"),
   quickAddRepeatBtn: document.querySelector("#quickAddRepeatBtn"),
@@ -126,7 +129,11 @@ const els = {
   clientFields: {
     id: document.querySelector("#clientId"),
     name: document.querySelector("#clientName"),
+    constitution: document.querySelector("#clientConstitution"),
     category: document.querySelector("#clientCategory"),
+    pan_no: document.querySelector("#clientPan"),
+    contact_id: document.querySelector("#clientContact"),
+    contact_role: document.querySelector("#clientContactRole"),
     phone: document.querySelector("#clientPhone"),
     whatsapp: document.querySelector("#clientWhatsapp"),
     email: document.querySelector("#clientEmail"),
@@ -142,6 +149,7 @@ const els = {
     phone: document.querySelector("#contactPhone"),
     phone_label: document.querySelector("#contactPhoneLabel"),
     whatsapp: document.querySelector("#contactWhatsapp"),
+    pan_no: document.querySelector("#contactPan"),
     email: document.querySelector("#contactEmail"),
     company: document.querySelector("#contactCompany"),
     address: document.querySelector("#contactAddress"),
@@ -607,6 +615,18 @@ function isValidGstNumber(value) {
   return !value || /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(value);
 }
 
+function panNumber(value = "") {
+  return String(value).replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 10);
+}
+
+function normalizePanInput(field) {
+  field.value = panNumber(field.value);
+}
+
+function isValidPanNumber(value) {
+  return !value || /^[A-Z]{5}[0-9]{4}[A-Z]$/.test(value);
+}
+
 function byName(a, b) {
   return String(a.name || a).localeCompare(String(b.name || b), undefined, { sensitivity: "base" });
 }
@@ -636,6 +656,12 @@ function populateScheduleClients(selectedIds = []) {
     .join("");
 }
 
+function populateClientContacts(selectedId = "") {
+  els.clientFields.contact_id.innerHTML = `<option value="">No primary contact</option>${sortedItems(state.contacts)
+    .map((contact) => `<option value="${contact.id}" ${String(contact.id) === String(selectedId || "") ? "selected" : ""}>${escapeHtml(contact.name)}</option>`)
+    .join("")}`;
+}
+
 function populateMasterControls() {
   state.master.categories = sortedValues(state.master.categories);
   state.master.priorities = sortedValues(state.master.priorities);
@@ -647,6 +673,7 @@ function populateMasterControls() {
   els.fields.repeat_type.innerHTML = optionTags(state.master.repeat_types);
   els.fields.owner.innerHTML = optionTags(state.master.owners);
   els.clientFields.category.innerHTML = optionTags(state.master.categories);
+  populateClientContacts(els.clientFields.contact_id?.value || "");
   els.fields.client_id.innerHTML = `<option value="">No client</option>${sortedItems(state.clients)
     .map((client) => `<option value="${client.id}">${escapeHtml(client.name)}</option>`)
     .join("")}`;
@@ -704,7 +731,10 @@ function matchesSearchText(text, query) {
 function clientSearchText(client = {}) {
   return [
     client.name,
+    client.constitution,
     client.category,
+    client.pan_no,
+    client.contact_role,
     client.phone,
     client.whatsapp,
     client.email,
@@ -1143,7 +1173,11 @@ function emptyTemplateValues(variables) {
 function clientTemplateValues(client = {}) {
   return {
     client_name: client.name || "",
+    client_constitution: client.constitution || "Individual",
     client_category: client.category || "",
+    client_pan_no: client.pan_no || "",
+    client_contact_id: client.contact_id || "",
+    client_contact_role: client.contact_role || "",
     client_phone: client.phone || "",
     client_whatsapp: client.whatsapp || "",
     client_email: client.email || "",
@@ -1159,6 +1193,10 @@ function clientTemplateValues(client = {}) {
 
 function contactForClient(client) {
   if (!client) return null;
+  if (client.contact_id) {
+    const linkedContact = (state.contacts || []).find((contact) => Number(contact.id) === Number(client.contact_id));
+    if (linkedContact) return linkedContact;
+  }
   const clientName = (client.name || "").trim().toLowerCase();
   const clientEmail = (client.email || "").trim().toLowerCase();
   const clientNumbers = [client.phone, client.whatsapp].map(phoneDigits).filter(Boolean);
@@ -1172,6 +1210,14 @@ function contactForClient(client) {
   }) || null;
 }
 
+function clientMessagePhone(client, channel = "whatsapp") {
+  const contact = contactForClient(client);
+  if (channel === "whatsapp") {
+    return client.whatsapp || contact?.whatsapp || client.phone || contact?.phone || "";
+  }
+  return client.phone || contact?.phone || client.whatsapp || contact?.whatsapp || "";
+}
+
 function contactTemplateValues(contact = null) {
   return {
     ...emptyTemplateValues(CONTACT_TEMPLATE_VARIABLES),
@@ -1181,6 +1227,7 @@ function contactTemplateValues(contact = null) {
     contact_phone: contact?.phone || "",
     contact_phone_label: contact?.phone_label || "",
     contact_whatsapp: contact?.whatsapp || "",
+    contact_pan_no: contact?.pan_no || "",
     contact_email: contact?.email || "",
     contact_company: contact?.company || "",
     contact_address: contact?.address || "",
@@ -1255,7 +1302,7 @@ function sendClientMessage(clientId, channel, source) {
   const client = state.clients.find((item) => Number(item.id) === Number(clientId));
   if (!client) return;
 
-  const phone = phoneDigits(channel === "whatsapp" ? client.whatsapp || client.phone : client.phone);
+  const phone = phoneDigits(clientMessagePhone(client, channel));
   if (!phone) {
     window.alert(`No ${channel === "whatsapp" ? "WhatsApp" : "SMS"} number saved for ${client.name}.`);
     return;
@@ -1338,7 +1385,7 @@ function taskStageMessage(task, stage, previousTask = null) {
 function sendTaskStageWhatsApp(task, stage, previousTask = null) {
   const prepared = taskStageMessage(task, stage, previousTask);
   if (!prepared) return;
-  const phone = prepared.client.whatsapp || prepared.client.phone;
+  const phone = clientMessagePhone(prepared.client, "whatsapp");
   if (!phone) return;
   openPreparedMessage("whatsapp", phone, prepared.message);
 }
@@ -1452,12 +1499,14 @@ function renderClients() {
           .map((client) => {
             const blockers = clientBlockers(client.id);
             const taskNotes = clientTaskNotes(client.id);
+            const contact = contactForClient(client);
             return `
               <article class="client-card">
                 <div class="task-row">
                   <div>
                     <button class="task-title" data-action="edit-client" data-id="${client.id}">${escapeHtml(client.name)}</button>
-                    <div class="task-meta">${escapeHtml(client.category || "Client")} - ${escapeHtml(client.phone || "No phone")} - ${escapeHtml(client.email || "No email")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
+                    <div class="task-meta">${escapeHtml(client.constitution || "Individual")} - ${escapeHtml(client.category || "Client")} - PAN: ${escapeHtml(client.pan_no || "Not set")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
+                    <div class="task-meta">Contact: ${escapeHtml(contact?.name || "Not linked")}${client.contact_role ? ` (${escapeHtml(client.contact_role)})` : ""} - ${escapeHtml(contact?.phone || contact?.whatsapp || client.phone || "No phone")} - ${escapeHtml(client.email || contact?.email || "No email")}</div>
                     ${client.birth_date ? `<div class="task-meta">Birth date: ${formatDate(client.birth_date)}</div>` : ""}
                   </div>
                 </div>
@@ -1496,6 +1545,7 @@ function contactSearchText(contact) {
     contact.company,
     contact.phone,
     contact.whatsapp,
+    contact.pan_no,
     contact.email,
     contact.address,
     contact.related_name,
@@ -1558,6 +1608,7 @@ function renderContacts() {
                   <div class="task-meta contact-meta">
                     ${contact.company ? `<span>${escapeHtml(contact.company)}</span>` : ""}
                     ${phone ? `<span>${escapeHtml(phoneLabel)}: ${escapeHtml(phone)}</span>` : ""}
+                    ${contact.pan_no ? `<span>PAN: ${escapeHtml(contact.pan_no)}</span>` : ""}
                     ${contact.email ? `<span>${escapeHtml(contact.email)}</span>` : ""}
                     ${dates}
                   </div>
@@ -1596,6 +1647,7 @@ function contactPayload() {
     phone_label: els.contactFields.phone_label.value.trim() || "Mobile",
     whatsapp: phoneDigits(els.contactFields.whatsapp.value),
     whatsapp_label: "WhatsApp",
+    pan_no: panNumber(els.contactFields.pan_no.value),
     email: emailValue(els.contactFields.email.value),
     company: els.contactFields.company.value.trim(),
     address: els.contactFields.address.value.trim(),
@@ -1613,6 +1665,7 @@ function validateContactPayload(payload) {
   if (!payload.name) return "First name or last name is required.";
   if (payload.phone && !isTenDigitPhone(payload.phone)) return "Mobile must be exactly 10 digits.";
   if (payload.whatsapp && !isTenDigitPhone(payload.whatsapp)) return "WhatsApp must be exactly 10 digits.";
+  if (!isValidPanNumber(payload.pan_no)) return "Contact PAN No. must be a valid 10-character PAN.";
   if (!isValidEmail(payload.email)) return "Email must be valid.";
   if (!payload.phone && !payload.whatsapp && !payload.email) return "Add at least one phone, WhatsApp, or email.";
   return "";
@@ -1622,7 +1675,7 @@ function openContactDialog(contact = null) {
   els.contactForm.reset();
   els.deleteContactBtn.hidden = !contact;
   els.contactDialogTitle.textContent = contact ? "Edit contact" : "Add contact";
-  const defaults = { id: "", first_name: "", last_name: "", phone: "", phone_label: "Mobile", whatsapp: "", email: "", company: "", address: "", location_url: "", birth_date: "", important_date: "", important_date_label: "", related_name: "", social_profile: "", notes: "" };
+  const defaults = { id: "", first_name: "", last_name: "", phone: "", phone_label: "Mobile", whatsapp: "", pan_no: "", email: "", company: "", address: "", location_url: "", birth_date: "", important_date: "", important_date_label: "", related_name: "", social_profile: "", notes: "" };
   const data = { ...defaults, ...(contact || {}) };
   if (contact?.name && !data.first_name && !data.last_name) {
     const parts = contact.name.split(" ").filter(Boolean);
@@ -1662,7 +1715,7 @@ async function saveContactForm(event) {
       method: id ? "PUT" : "POST",
       body: JSON.stringify(payload),
     });
-    if (savedContact?.id && (savedContact.phone || savedContact.whatsapp) && window.confirm(`Also save "${savedContact.name}" in clients?`)) {
+    if (!state.resumeClientAfterContact && savedContact?.id && (savedContact.phone || savedContact.whatsapp) && window.confirm(`Also save "${savedContact.name}" in clients?`)) {
       await api(`${API_CONTACTS_URL}/${savedContact.id}/make-client`, { method: "POST" });
     }
   } catch (error) {
@@ -1674,6 +1727,12 @@ async function saveContactForm(event) {
   await loadActivity();
   populateMasterControls();
   closeDialog(els.contactDialog, els.contactForm, { skipConfirm: true });
+  if (state.resumeClientAfterContact && state.resumeClientDraft && savedContact?.id) {
+    state.resumeClientDraft.contact_id = savedContact.id;
+    state.resumeClientDraft.contact_role = state.resumeClientDraft.contact_role || "Primary contact";
+    resumeClientDraft();
+    return;
+  }
   render();
 }
 
@@ -1880,7 +1939,10 @@ function masterTypeLabel(type) {
 
 const CLIENT_TEMPLATE_VARIABLES = [
   ["client_name", "Client name"],
+  ["client_constitution", "Client constitution"],
   ["client_category", "Client category"],
+  ["client_pan_no", "Client PAN number"],
+  ["client_contact_role", "Client contact role"],
   ["client_phone", "Client phone"],
   ["client_whatsapp", "Client WhatsApp"],
   ["client_email", "Client email"],
@@ -1898,6 +1960,7 @@ const CONTACT_TEMPLATE_VARIABLES = [
   ["contact_phone", "Contact phone"],
   ["contact_phone_label", "Contact phone label"],
   ["contact_whatsapp", "Contact WhatsApp"],
+  ["contact_pan_no", "Contact PAN number"],
   ["contact_email", "Contact email"],
   ["contact_company", "Contact company"],
   ["contact_address", "Contact address"],
@@ -2303,7 +2366,11 @@ function currentClientDraft() {
     return {
       id: els.clientFields.id.value,
       name: els.clientFields.name.value.trim(),
+      constitution: els.clientFields.constitution.value || "Individual",
       category: els.clientFields.category.value || "Client",
+      pan_no: panNumber(els.clientFields.pan_no.value),
+      contact_id: els.clientFields.contact_id.value ? Number(els.clientFields.contact_id.value) : null,
+      contact_role: els.clientFields.contact_role.value.trim(),
       phone: phoneDigits(els.clientFields.phone.value),
       whatsapp: phoneDigits(els.clientFields.whatsapp.value),
       email: emailValue(els.clientFields.email.value),
@@ -2320,6 +2387,7 @@ function resumeClientDraft() {
   const draft = state.resumeClientDraft;
   state.resumeClientDraft = null;
   state.resumeClientAfterMasterType = "";
+  state.resumeClientAfterContact = false;
   if (draft) openClientDialog(draft);
 }
 
@@ -2344,6 +2412,13 @@ function quickAddMasterFromClient(type) {
   window.setTimeout(() => openMasterDialog(type), 0);
 }
 
+function quickAddContactFromClient() {
+  state.resumeClientDraft = currentClientDraft();
+  state.resumeClientAfterContact = true;
+  closeDialog(els.clientDialog, els.clientForm, { skipConfirm: true });
+  window.setTimeout(() => openContactDialog(), 0);
+}
+
 function openClientDialog(client = null) {
   els.clientForm.reset();
   els.deleteClientBtn.hidden = !client;
@@ -2351,7 +2426,11 @@ function openClientDialog(client = null) {
   const defaults = {
     id: "",
     name: "",
+    constitution: "Individual",
     category: state.master.categories[0] || "Client",
+    pan_no: "",
+    contact_id: "",
+    contact_role: "",
     phone: "",
     whatsapp: "",
     email: "",
@@ -2361,6 +2440,7 @@ function openClientDialog(client = null) {
     birth_date: "",
   };
   const data = { ...defaults, ...(client || {}) };
+  populateClientContacts(data.contact_id || "");
   Object.entries(els.clientFields).forEach(([key, field]) => {
     if (key === "birth_date") {
       field.value = isoToDisplayDate(data[key]);
@@ -2375,7 +2455,11 @@ function openClientDialog(client = null) {
 function readClientForm() {
   return {
     name: els.clientFields.name.value.trim(),
+    constitution: els.clientFields.constitution.value || "Individual",
     category: els.clientFields.category.value || "Client",
+    pan_no: panNumber(els.clientFields.pan_no.value),
+    contact_id: els.clientFields.contact_id.value ? Number(els.clientFields.contact_id.value) : null,
+    contact_role: els.clientFields.contact_role.value.trim(),
     phone: phoneDigits(els.clientFields.phone.value),
     whatsapp: phoneDigits(els.clientFields.whatsapp.value),
     email: emailValue(els.clientFields.email.value),
@@ -2397,8 +2481,18 @@ async function saveClientForm(event) {
     return;
   }
   if (!payload.name) return;
-  if (!isTenDigitPhone(payload.phone)) {
-    window.alert("Mobile / SMS must be exactly 10 digits.");
+  if (payload.constitution === "Individual" && !payload.phone) {
+    window.alert("Mobile / SMS is required for Individual clients.");
+    els.clientFields.phone.focus();
+    return;
+  }
+  if (ORGANIZATION_CONSTITUTIONS.has(payload.constitution) && !payload.contact_id) {
+    window.alert(`${payload.constitution} client must have a primary contact selected.`);
+    els.clientFields.contact_id.focus();
+    return;
+  }
+  if (payload.phone && !isTenDigitPhone(payload.phone)) {
+    window.alert("Mobile / SMS must be exactly 10 digits when entered.");
     els.clientFields.phone.focus();
     return;
   }
@@ -2410,6 +2504,11 @@ async function saveClientForm(event) {
   if (!isValidEmail(payload.email)) {
     window.alert("Email must be valid.");
     els.clientFields.email.focus();
+    return;
+  }
+  if (!isValidPanNumber(payload.pan_no)) {
+    window.alert("Client PAN No. must be a valid 10-character PAN.");
+    els.clientFields.pan_no.focus();
     return;
   }
   if (!isValidGstNumber(payload.gst_no)) {
@@ -2425,7 +2524,7 @@ async function saveClientForm(event) {
       method: id ? "PUT" : "POST",
       body: JSON.stringify(payload),
     });
-    if (savedClient?.id && window.confirm(`Also save "${savedClient.name}" in contacts?`)) {
+    if (savedClient?.id && savedClient.constitution === "Individual" && window.confirm(`Also save "${savedClient.name}" in contacts?`)) {
       await api(`${API_CLIENTS_URL}/${savedClient.id}/make-contact`, { method: "POST" });
     }
   } catch (error) {
@@ -2905,6 +3004,7 @@ function parseCsvContacts(text) {
       phone_label: row["phone tag"] || row["phone label"] || "Mobile",
       whatsapp: row.whatsapp || "",
       whatsapp_label: row["whatsapp tag"] || row["whatsapp label"] || "WhatsApp",
+      pan_no: panNumber(row.pan || row["pan no"] || row["pan number"] || ""),
       email: row.email || row.mail || "",
       company: row.company || row.organization || "",
       address: row.address || "",
@@ -2940,15 +3040,15 @@ function parseVcfContacts(text) {
       const birth_date = importedDateToISO(valueFor(["BDAY"]));
       const social_profile = valueFor(["X-SOCIALPROFILE", "URL"]);
       const notes = valueFor(["NOTE"]);
-      return { name, first_name, last_name, phone, phone_label: "Mobile", whatsapp: "", whatsapp_label: "WhatsApp", email, company, address, birth_date, social_profile, notes };
+      return { name, first_name, last_name, phone, phone_label: "Mobile", whatsapp: "", whatsapp_label: "WhatsApp", pan_no: "", email, company, address, birth_date, social_profile, notes };
     })
     .filter((contact) => contact.name);
 }
 
 function exportContactsCSV() {
-  const headers = ["Name", "First Name", "Last Name", "Phone Tag", "Phone", "WhatsApp", "Email", "Company", "Address", "Location URL", "Birthday", "Other Date Label", "Other Date", "Related Name", "Social Profile", "Notes"];
+  const headers = ["Name", "First Name", "Last Name", "Phone Tag", "Phone", "WhatsApp", "PAN No", "Email", "Company", "Address", "Location URL", "Birthday", "Other Date Label", "Other Date", "Related Name", "Social Profile", "Notes"];
   const rows = state.contacts.map((contact) =>
-    [contact.name, contact.first_name, contact.last_name, contact.phone_label, contact.phone, contact.whatsapp, contact.email, contact.company, contact.address, contact.location_url, dateTemplateValue(contact.birth_date), contact.important_date_label, dateTemplateValue(contact.important_date), contact.related_name, contact.social_profile, contact.notes].map(csvCell).join(",")
+    [contact.name, contact.first_name, contact.last_name, contact.phone_label, contact.phone, contact.whatsapp, contact.pan_no, contact.email, contact.company, contact.address, contact.location_url, dateTemplateValue(contact.birth_date), contact.important_date_label, dateTemplateValue(contact.important_date), contact.related_name, contact.social_profile, contact.notes].map(csvCell).join(",")
   );
   downloadTextFile(`gpa-v3-contacts-${todayISO()}.csv`, [headers.map(csvCell).join(","), ...rows].join("\n"), "text/csv;charset=utf-8");
 }
@@ -2993,7 +3093,11 @@ function exportCSV() {
     "Task Time",
     "Client ID",
     "Client Name",
+    "Client Constitution",
     "Client Category",
+    "Client PAN No.",
+    "Client Contact Name",
+    "Client Contact Role",
     "Client Mobile",
     "Client WhatsApp",
     "Client Email",
@@ -3035,7 +3139,11 @@ function exportCSV() {
       task.task_time,
       task.client_id,
       client?.name,
+      client?.constitution,
       client?.category,
+      client?.pan_no,
+      contactForClient(client)?.name,
+      client?.contact_role,
       client?.phone,
       client?.whatsapp,
       client?.email,
@@ -3091,7 +3199,11 @@ function exportCSV() {
       task.task_time || "",
       task.client_id || "",
       client?.name,
+      client?.constitution,
       client?.category,
+      client?.pan_no,
+      contactForClient(client)?.name,
+      client?.contact_role,
       client?.phone,
       client?.whatsapp,
       client?.email,
@@ -3157,6 +3269,7 @@ function bindEvents() {
   els.quickAddBtn.addEventListener("click", () => openTaskDialog());
   els.quickAddClientBtn.addEventListener("click", quickAddClientFromTask);
   els.quickAddClientCategoryBtn.addEventListener("click", () => quickAddMasterFromClient("categories"));
+  els.quickAddClientContactBtn.addEventListener("click", quickAddContactFromClient);
   els.quickAddPriorityBtn.addEventListener("click", () => quickAddMasterFromTask("priorities"));
   els.quickAddStatusBtn.addEventListener("click", () => quickAddMasterFromTask("statuses"));
   els.quickAddRepeatBtn.addEventListener("click", () => quickAddMasterFromTask("repeat-types"));
@@ -3188,6 +3301,9 @@ function bindEvents() {
     field.addEventListener("input", () => normalizeDateTyping(field));
   });
   els.clientFields.gst_no.addEventListener("input", () => normalizeGstInput(els.clientFields.gst_no));
+  [els.clientFields.pan_no, els.contactFields.pan_no].forEach((field) => {
+    field.addEventListener("input", () => normalizePanInput(field));
+  });
   els.scheduleForm.addEventListener("submit", saveScheduleForm);
   els.masterForm.addEventListener("submit", saveMasterForm);
   els.deleteTaskBtn.addEventListener("click", () => {
