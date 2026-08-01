@@ -355,6 +355,16 @@ def create_next_occurrence(task: Task) -> Task | None:
     )
 
 
+def add_next_occurrence(session: Session, task: Task) -> Task | None:
+    next_task = create_next_occurrence(task)
+    if not next_task:
+        return None
+    session.add(next_task)
+    session.flush()
+    log_activity(session, "CREATED", "task", f"Auto-created recurring task: {next_task.title}", next_task.id, next_task.uuid)
+    return next_task
+
+
 def get_task_or_404(task_id: int, session: Session) -> Task:
     task = session.get(Task, task_id)
     if not task:
@@ -1704,6 +1714,7 @@ def create_task(task_data: TaskCreate, session: Session = Depends(get_session)):
 @router.put("/tasks/{task_id}")
 def update_task(task_id: int, task_data: TaskUpdate, session: Session = Depends(get_session)):
     current_task = get_task_or_404(task_id, session)
+    was_completed = task_is_done(current_task)
     data = normalize_task_data(task_data, session)
     ensure_unique_open_task(session, data, exclude_id=task_id)
     task, changes = apply_normalized_task_data(current_task, data)
@@ -1712,6 +1723,8 @@ def update_task(task_id: int, task_data: TaskUpdate, session: Session = Depends(
     if changes:
         stage = "completed" if task.status == "Completed" else "updated"
         send_task_stage_whatsapp(session, task, stage, changes)
+    if not was_completed and task.status == "Completed":
+        add_next_occurrence(session, task)
     session.commit()
     session.refresh(task)
     return task
@@ -1727,11 +1740,7 @@ def complete_task(task_id: int, session: Session = Depends(get_session)):
         session.add(task)
         log_activity(session, "COMPLETED", "task", f"Completed task: {task.title}", task.id, task.uuid)
         send_task_stage_whatsapp(session, task, "completed")
-        next_task = create_next_occurrence(task)
-        if next_task:
-            session.add(next_task)
-            session.flush()
-            log_activity(session, "CREATED", "task", f"Auto-created recurring task: {next_task.title}", next_task.id, next_task.uuid)
+        add_next_occurrence(session, task)
     session.commit()
     session.refresh(task)
     return task
@@ -1816,6 +1825,7 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
         task.updated_at = now()
         session.add(task)
         log_activity(session, "COMPLETED", "task", f"AI completed task: {task.title}", task.id, task.uuid)
+        add_next_occurrence(session, task)
         session.commit()
         session.refresh(task)
         return {"action": "COMPLETED_TASK", "message": f"Completed: {task.title}", "task": task}
