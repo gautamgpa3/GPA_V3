@@ -28,7 +28,17 @@ router = APIRouter(prefix="/api", tags=["Tasks"])
 GOOGLE_SYNC_JOBS: dict[str, dict] = {}
 GOOGLE_SYNC_LOCK = Lock()
 INCOME_TAX_CALENDAR_URL = "https://wmstatic-prd.incometaxindia.gov.in/en/web/guest/tax-calendar"
+INCOME_TAX_ITR_FAQ_URLS = [
+    "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%201-faqs",
+    "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%202-faqs",
+    "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%203-faqs",
+    "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%204-faqs",
+    "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%205-faqs",
+    "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%206-faqs",
+    "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%207-faqs",
+]
 ITR_TERMS = ("itr", "income tax return", "return of income", "income-tax return")
+OFFICIAL_DATE_PATTERN = r"(?<!\d)(?:20\d{2}-\d{1,2}-\d{1,2}|\d{1,2}(?:\^\{(?:st|nd|rd|th)\}|st|nd|rd|th)?[-\s]+[A-Za-z]{3,9}[-,\s]+20\d{2})(?!\d)"
 
 
 class TaskBase(BaseModel):
@@ -1057,19 +1067,47 @@ def clean_html_text(html: str) -> str:
     return sub(r"\s+", " ", unescape(text)).strip()
 
 
-def fetch_official_income_tax_text() -> str:
+def official_request_headers() -> dict[str, str]:
+    return {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/126.0 Safari/537.36 GPA-V3"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-IN,en;q=0.9",
+        "Connection": "close",
+    }
+
+
+def fetch_official_page_text(url: str) -> str:
     request = Request(
-        INCOME_TAX_CALENDAR_URL,
-        headers={
-            "User-Agent": "GPA-V3/1.0 (+https://gpa.cagautamacharya.com)",
-            "Accept": "text/html,application/xhtml+xml",
-        },
+        url,
+        headers=official_request_headers(),
     )
     try:
         with urlopen(request, timeout=45) as response:
             return clean_html_text(response.read().decode("utf-8", errors="ignore"))
     except (HTTPError, URLError, TimeoutError) as error:
-        raise RuntimeError(f"Could not read official Income Tax Calendar: {error}") from error
+        raise RuntimeError(f"{url}: {error}") from error
+
+
+def official_income_tax_pages() -> list[tuple[str, str]]:
+    pages = []
+    errors = []
+    for url in [INCOME_TAX_CALENDAR_URL, *INCOME_TAX_ITR_FAQ_URLS]:
+        try:
+            pages.append((url, fetch_official_page_text(url)))
+        except RuntimeError as error:
+            errors.append(str(error))
+    if pages:
+        return pages
+    return [
+        (
+            INCOME_TAX_CALENDAR_URL,
+            " ".join(errors) or "Official Income Tax pages could not be read from this server.",
+        )
+    ]
 
 
 MONTH_LOOKUP = {
@@ -1101,6 +1139,7 @@ MONTH_LOOKUP = {
 
 
 def parse_due_date_text(value: str) -> date | None:
+    value = sub(r"\^\{(?:st|nd|rd|th)\}", "", value, flags=2)
     iso_match = search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", value)
     if iso_match:
         return date(int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3)))
@@ -1112,21 +1151,27 @@ def parse_due_date_text(value: str) -> date | None:
     return None
 
 
-def official_itr_due_date_for_year(year: int) -> tuple[date | None, str]:
-    official_text = fetch_official_income_tax_text()
-    candidates: list[tuple[date, str]] = []
-    for match in finditer(r"\b(?:20\d{2}-\d{1,2}-\d{1,2}|\d{1,2}(?:st|nd|rd|th)?[-\s]+[A-Za-z]{3,9}[-,\s]+20\d{2})\b", official_text, flags=2):
-        found = parse_due_date_text(match.group(0))
-        if not found or found.year != year:
-            continue
-        window = official_text[max(0, match.start() - 220) : match.end() + 220].lower()
-        if any(term in window for term in ITR_TERMS):
-            candidates.append((found, window))
+def official_itr_due_date_for_year(year: int) -> tuple[date | None, str, str]:
+    candidates: list[tuple[date, str, str]] = []
+    page_errors = []
+    for source_url, official_text in official_income_tax_pages():
+        if "http" in official_text and "error" in official_text.lower():
+            page_errors.append(official_text[:320])
+        for match in finditer(OFFICIAL_DATE_PATTERN, official_text, flags=2):
+            found = parse_due_date_text(match.group(0))
+            if not found or found.year != year:
+                continue
+            window = official_text[max(0, match.start() - 260) : match.end() + 260].lower()
+            if any(term in window for term in ITR_TERMS):
+                candidates.append((found, window, source_url))
     if not candidates:
-        return None, "No clear ITR due date found on the official Income Tax Calendar page."
+        detail = "No clear ITR due date found on official Income Tax pages."
+        if page_errors:
+            detail = f"{detail} Access issue: {'; '.join(page_errors)[:500]}"
+        return None, detail, INCOME_TAX_CALENDAR_URL
     candidates.sort(key=lambda item: item[0])
-    selected, context = candidates[-1]
-    return selected, context[:320]
+    selected, context, source_url = candidates[-1]
+    return selected, context[:320], source_url
 
 
 def sync_itr_task_dates(session: Session, dry_run: bool = False) -> dict:
@@ -1135,7 +1180,7 @@ def sync_itr_task_dates(session: Session, dry_run: bool = False) -> dict:
     if not open_itr_tasks:
         return {"success": True, "updated": 0, "review_required": 0, "tasks": [], "message": "No open ITR tasks found."}
 
-    due_cache: dict[int, tuple[date | None, str]] = {}
+    due_cache: dict[int, tuple[date | None, str, str]] = {}
     results = []
     updated = 0
     review_required = 0
@@ -1143,7 +1188,7 @@ def sync_itr_task_dates(session: Session, dry_run: bool = False) -> dict:
         target_year = (task.due_date or task.start_date or today).year
         if target_year not in due_cache:
             due_cache[target_year] = official_itr_due_date_for_year(target_year)
-        official_due, source_context = due_cache[target_year]
+        official_due, source_context, source_url = due_cache[target_year]
         start_date = date(target_year, 6, 1)
         result = {
             "id": task.id,
@@ -1153,7 +1198,7 @@ def sync_itr_task_dates(session: Session, dry_run: bool = False) -> dict:
             "old_due_date": task.due_date.isoformat() if task.due_date else "",
             "new_start_date": start_date.isoformat(),
             "new_due_date": official_due.isoformat() if official_due else "",
-            "source": INCOME_TAX_CALENDAR_URL,
+            "source": source_url,
             "source_context": source_context,
             "updated": False,
             "review_required": official_due is None,
