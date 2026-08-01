@@ -1032,6 +1032,37 @@ def assistant_repeat_type(text: str) -> str:
     return "None"
 
 
+def assistant_requested_client_name(text: str) -> str:
+    match = search(r"(?i)\b(?:of|for)\s+(.+)$", text)
+    if not match:
+        return ""
+    name = match.group(1).strip()
+    for marker in (
+        " for ay ",
+        " ay ",
+        " before ",
+        " due ",
+        " by ",
+        " on ",
+        " at ",
+        " time ",
+        " topic ",
+        " regarding ",
+        " about ",
+        " details ",
+        " note ",
+        " notes ",
+        " high priority",
+        " urgent",
+        " normal priority",
+        " low priority",
+    ):
+        index = name.lower().find(marker)
+        if index >= 0:
+            name = name[:index].strip()
+    return name[:200]
+
+
 def assistant_client(session: Session, text: str) -> Client | None:
     lower = text.lower()
     clients = session.exec(select(Client).where(Client.active == True).order_by(Client.name)).all()  # noqa: E712
@@ -2110,6 +2141,13 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
         due = parse_assistant_date(lower)
         title = assistant_task_title(text)
         client = assistant_client(session, text)
+        requested_client = assistant_requested_client_name(text)
+        if requested_client and client is None:
+            return {
+                "action": "CLIENT_NOT_FOUND",
+                "message": f'No client found named "{requested_client}". Please add this client first, then ask GPA again.',
+                "client_name": requested_client,
+            }
         topic = assistant_topic(text)
         task_time = assistant_task_time(text)
         details = assistant_details(text)
