@@ -37,7 +37,7 @@ INCOME_TAX_ITR_FAQ_URLS = [
     "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%206-faqs",
     "https://www.incometax.gov.in/iec/foportal/help/all-topics/e-filing-services/itr%207-faqs",
 ]
-ITR_TERMS = ("itr", "income tax return", "return of income", "income-tax return")
+ITR_TERMS = ("itr", "income tax return", "inocme tax return", "return of income", "income-tax return")
 OFFICIAL_DATE_PATTERN = r"(?<!\d)(?:20\d{2}-\d{1,2}-\d{1,2}|\d{1,2}(?:\^\{(?:st|nd|rd|th)\}|st|nd|rd|th)?[-\s]+[A-Za-z]{3,9}[-,\s]+20\d{2})(?!\d)"
 
 
@@ -1056,8 +1056,12 @@ def task_text(task: Task) -> str:
     )
 
 
+def task_identity_text(task: Task) -> str:
+    return " ".join([task.title or "", task.description or "", task.topic or ""])
+
+
 def is_itr_task(task: Task) -> bool:
-    return any(term in task_text(task).lower() for term in ITR_TERMS)
+    return any(term in task_identity_text(task).lower() for term in ITR_TERMS)
 
 
 def clean_html_text(html: str) -> str:
@@ -1190,6 +1194,8 @@ def sync_itr_task_dates(session: Session, dry_run: bool = False) -> dict:
             due_cache[target_year] = official_itr_due_date_for_year(target_year)
         official_due, source_context, source_url = due_cache[target_year]
         start_date = date(target_year, 6, 1)
+        next_due = official_due or task.due_date
+        needs_review = official_due is None
         result = {
             "id": task.id,
             "uuid": task.uuid,
@@ -1197,19 +1203,18 @@ def sync_itr_task_dates(session: Session, dry_run: bool = False) -> dict:
             "old_start_date": task.start_date.isoformat() if task.start_date else "",
             "old_due_date": task.due_date.isoformat() if task.due_date else "",
             "new_start_date": start_date.isoformat(),
-            "new_due_date": official_due.isoformat() if official_due else "",
+            "new_due_date": next_due.isoformat() if next_due else "",
             "source": source_url,
-            "source_context": source_context,
+            "source_context": source_context if official_due else f"{source_context} Existing due date preserved until official date is confirmed.",
             "updated": False,
-            "review_required": official_due is None,
+            "review_required": needs_review,
         }
-        if official_due is None:
+        if needs_review:
             review_required += 1
-            results.append(result)
-            continue
         if not dry_run:
             task.start_date = start_date
-            task.due_date = official_due
+            if next_due:
+                task.due_date = next_due
             task.repeat_type = "Yearly"
             task.repeat_every = 1
             task.reminder = True
@@ -1222,7 +1227,7 @@ def sync_itr_task_dates(session: Session, dry_run: bool = False) -> dict:
                 f"Synced ITR dates from official Income Tax Calendar: {task.title}",
                 task.id,
                 task.uuid,
-                f"Start Date -> {start_date.isoformat()}; Due Date -> {official_due.isoformat()}",
+                f"Start Date -> {start_date.isoformat()}; Due Date -> {next_due.isoformat() if next_due else 'manual review needed'}",
             )
         updated += 1
         result["updated"] = not dry_run
