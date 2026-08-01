@@ -8,6 +8,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from backend.models.activity import ActivityLog
@@ -251,6 +252,70 @@ def find_google_match(session: Session, contact: ParsedGoogleContact) -> Contact
     return next((existing for existing in contacts if existing.name.strip().casefold() == normalized_name), None)
 
 
+def deleted_contact_name(session: Session, contact: Contact) -> str:
+    base = f"{contact.name} (deleted {contact.id})"
+    candidate = base
+    counter = 2
+    names = {item.name.strip().casefold() for item in session.exec(select(Contact)).all() if item.id != contact.id}
+    while candidate.strip().casefold() in names:
+        candidate = f"{base}-{counter}"
+        counter += 1
+    return candidate
+
+
+def release_inactive_google_conflicts(session: Session, target: Contact, google_contact: ParsedGoogleContact) -> None:
+    contacts = session.exec(select(Contact)).all()
+    target_numbers = {value for value in (google_contact.phone, google_contact.whatsapp) if value}
+    target_name = google_contact.name.strip().casefold()
+    target_email = google_contact.email.strip().casefold()
+    target_google_id = google_contact.google_resource_name.strip()
+    for existing in contacts:
+        if existing.id == target.id or existing.active:
+            continue
+        changed = False
+        if target_name and existing.name.strip().casefold() == target_name:
+            existing.name = deleted_contact_name(session, existing)
+            changed = True
+        if target_numbers and ({existing.phone, existing.whatsapp} & target_numbers):
+            existing.phone = ""
+            existing.whatsapp = ""
+            changed = True
+        if target_email and existing.email.strip().casefold() == target_email:
+            existing.email = ""
+            changed = True
+        if target_google_id and existing.google_resource_name == target_google_id:
+            existing.google_resource_name = ""
+            existing.google_etag = ""
+            changed = True
+        if changed:
+            existing.updated_at = datetime.now()
+            session.add(existing)
+
+
+def apply_google_contact(contact: Contact, item: ParsedGoogleContact) -> None:
+    contact.name = item.name or contact.name
+    contact.first_name = item.first_name
+    contact.last_name = item.last_name
+    contact.phone = item.phone
+    contact.phone_label = item.phone_label or "Mobile"
+    contact.whatsapp = item.whatsapp or item.phone
+    contact.whatsapp_label = item.whatsapp_label or "WhatsApp"
+    contact.email = item.email
+    contact.company = item.company
+    contact.address = item.address
+    contact.location_url = item.location_url
+    contact.birth_date = item.birth_date
+    contact.important_date = item.important_date
+    contact.important_date_label = item.important_date_label
+    contact.related_name = item.related_name
+    contact.social_profile = item.social_profile
+    contact.notes = item.notes
+    contact.google_resource_name = item.google_resource_name or contact.google_resource_name
+    contact.google_etag = item.google_etag or contact.google_etag
+    contact.active = True
+    contact.updated_at = datetime.now()
+
+
 def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact], dry_run: bool = False) -> dict:
     created = 0
     updated = 0
@@ -269,27 +334,8 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
             elif existing.id is not None:
                 updated_contact_ids.add(existing.id)
             if not dry_run:
-                existing.name = item.name or existing.name
-                existing.first_name = item.first_name
-                existing.last_name = item.last_name
-                existing.phone = item.phone
-                existing.phone_label = item.phone_label or "Mobile"
-                existing.whatsapp = item.whatsapp or item.phone
-                existing.whatsapp_label = item.whatsapp_label or "WhatsApp"
-                existing.email = item.email
-                existing.company = item.company
-                existing.address = item.address
-                existing.location_url = item.location_url
-                existing.birth_date = item.birth_date
-                existing.important_date = item.important_date
-                existing.important_date_label = item.important_date_label
-                existing.related_name = item.related_name
-                existing.social_profile = item.social_profile
-                existing.notes = item.notes
-                existing.google_resource_name = item.google_resource_name or existing.google_resource_name
-                existing.google_etag = item.google_etag or existing.google_etag
-                existing.active = True
-                existing.updated_at = datetime.now()
+                release_inactive_google_conflicts(session, existing, item)
+                apply_google_contact(existing, item)
                 session.add(existing)
             updated += 1
             continue
@@ -331,7 +377,11 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
                 details="One-way import from Google Contacts",
             )
         )
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError as error:
+            session.rollback()
+            raise RuntimeError("Google contacts sync could not be saved because duplicate contact data already exists in GPA.") from error
     active_contacts = len(session.exec(select(Contact).where(Contact.active == True)).all())  # noqa: E712
     return {
         "success": True,
@@ -533,7 +583,45 @@ def sync_single_google_contact(session: Session, contact_id: int, dry_run: bool 
         match = next((item for item in parsed if item.name.strip().casefold() == normalized_name), None)
     if not match:
         return {"success": True, "created": 0, "updated": 0, "skipped": 1, "total": 0, "dry_run": dry_run, "message": "No matching Google contact found"}
-    return upsert_google_contacts(session, [match], dry_run=dry_run)
+    conflict = contact_conflict(session, match, exclude_id=contact.id)
+    if conflict:
+        return {
+            "success": True,
+            "created": 0,
+            "updated": 0,
+            "skipped": 1,
+            "total": 1,
+            "dry_run": dry_run,
+            "message": f"Google contact matches another active GPA contact: {conflict.name}. Please merge or edit that contact first.",
+        }
+    if not dry_run:
+        release_inactive_google_conflicts(session, contact, match)
+        apply_google_contact(contact, match)
+        session.add(contact)
+        session.add(
+            ActivityLog(
+                action="SYNCED",
+                entity_type="contact",
+                entity_id=contact.id,
+                summary=f"Synced Google contact: {contact.name}",
+                details="Single contact updated from Google Contacts",
+            )
+        )
+        try:
+            session.commit()
+        except IntegrityError as error:
+            session.rollback()
+            raise RuntimeError("This Google contact could not be saved because duplicate contact data still exists in GPA.") from error
+        session.refresh(contact)
+    return {
+        "success": True,
+        "created": 0,
+        "updated": 1,
+        "skipped": 0,
+        "total": 1,
+        "dry_run": dry_run,
+        "message": f"Google contact synced: {match.name}",
+    }
 
 
 def push_gpa_contacts_to_google(session: Session, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
