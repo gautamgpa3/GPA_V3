@@ -2107,6 +2107,85 @@ function assistantResponseText(response) {
   return response.message || "Done.";
 }
 
+function assistantTaskSummary(task = {}) {
+  const normalized = normalizeTask(task);
+  const client = clientName(normalized.client_id) || "No client selected";
+  const lines = [
+    `Title: ${taskDisplayTitle(normalized)}`,
+    `Client: ${client}`,
+    `Status: ${normalized.status}`,
+    `Priority: ${normalized.priority}`,
+    `Start date: ${formatDate(normalized.start_date)}`,
+    `Due date: ${formatDate(normalized.due_date)}`,
+  ];
+  if (normalized.task_time) lines.push(`Time: ${normalized.task_time}`);
+  if (normalized.topic) lines.push(`Topic: ${normalized.topic}`);
+  if (normalized.repeat_type && normalized.repeat_type !== "None") lines.push(`Repeat: ${normalized.repeat_type} every ${normalized.repeat_every}`);
+  if (normalized.notes) lines.push(`Notes: ${normalized.notes}`);
+  return lines.join("\n");
+}
+
+function assistantTasksPreview(tasks = []) {
+  if (!Array.isArray(tasks) || !tasks.length) return "";
+  return tasks
+    .slice(0, 8)
+    .map((task, index) => `${index + 1}. ${assistantTaskSummary(task)}`)
+    .join("\n\n");
+}
+
+function assistantActionTitle(action = "") {
+  const titles = {
+    CREATED_TASK: "Task created",
+    COMPLETED_TASK: "Task completed",
+    DAY_CLOSED: "Day planned",
+    ANSWER: "GPA answer",
+    BRIEFING: "Briefing",
+    CLIENT_CONTEXT: "Client details",
+    MEETING_PREP: "Meeting preparation",
+    ITR_DATE_SYNC: "ITR date sync",
+    ITR_DATE_SYNC_FAILED: "ITR date sync failed",
+    CLIENT_NOT_FOUND: "Client not found",
+    NEEDS_CLARIFICATION: "GPA needs clarification",
+  };
+  return titles[action] || "GPA AI result";
+}
+
+function assistantActionPopupText(response = {}) {
+  const parts = [assistantActionTitle(response.action), ""];
+  if (response.message) parts.push(response.message);
+
+  if (response.task) {
+    parts.push("", assistantTaskSummary(response.task));
+  }
+
+  const preview = assistantTasksPreview(response.tasks || response.pending_tasks || response.completed_tasks);
+  if (preview) {
+    parts.push("", "Related task(s):", preview);
+  }
+
+  if (response.client_name) {
+    parts.push("", `Client searched: ${response.client_name}`);
+  }
+
+  if (response.client) {
+    parts.push("", `Client: ${response.client.name || ""}`);
+    if (response.client.phone) parts.push(`Mobile: ${response.client.phone}`);
+    if (response.client.whatsapp) parts.push(`WhatsApp: ${response.client.whatsapp}`);
+    if (response.client.work_scope) parts.push(`Work scope: ${response.client.work_scope}`);
+  }
+
+  if (response.result) {
+    parts.push(
+      "",
+      `Updated: ${response.result.updated || 0}`,
+      `Review required: ${response.result.review_required || 0}`,
+      `Dry run: ${response.result.dry_run ? "Yes" : "No"}`
+    );
+  }
+
+  return parts.filter((part) => part !== undefined && part !== null).join("\n");
+}
+
 function render() {
   els.todayLabel.textContent = new Date().toLocaleDateString(undefined, { weekday: "long", day: "2-digit", month: "long", year: "numeric" });
   els.viewTitle.textContent = state.currentView[0].toUpperCase() + state.currentView.slice(1);
@@ -2701,8 +2780,15 @@ async function captureQuick() {
   const text = els.quickInput.value.trim();
   if (!text) return;
   if (!window.confirm(`Send this command to GPA AI?\n\n${text}`)) return;
-  await runAssistantCommand(text);
-  els.quickInput.value = "";
+  try {
+    const response = await runAssistantCommand(text);
+    window.alert(assistantActionPopupText(response));
+    if (!["CLIENT_NOT_FOUND", "NEEDS_CLARIFICATION", "ITR_DATE_SYNC_FAILED"].includes(response.action)) {
+      els.quickInput.value = "";
+    }
+  } catch (error) {
+    window.alert(`GPA AI could not complete this command.\n\nCommand: ${text}\n\nReason: ${error.message || error}`);
+  }
 }
 
 function showVoiceNotice(message) {
