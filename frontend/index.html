@@ -170,11 +170,11 @@
           </div>
           <label>
             <span>Start date</span>
-            <input id="taskStart" type="date" required />
+            <input id="taskStart" type="text" required inputmode="numeric" maxlength="10" pattern="[0-9]{2}-[0-9]{2}-[0-9]{4}" placeholder="dd-mm-yyyy" title="Enter date as dd-mm-yyyy" />
           </label>
           <label>
             <span>Due / last date</span>
-            <input id="taskDue" type="date" required />
+            <input id="taskDue" type="text" required inputmode="numeric" maxlength="10" pattern="[0-9]{2}-[0-9]{2}-[0-9]{4}" placeholder="dd-mm-yyyy" title="Enter date as dd-mm-yyyy" />
           </label>
           <label class="checkbox-field">
             <span>Reminder active</span>
@@ -248,7 +248,7 @@
           </label>
           <label>
             <span>Birth date</span>
-            <input id="clientBirthDate" type="date" />
+            <input id="clientBirthDate" type="text" inputmode="numeric" maxlength="10" pattern="[0-9]{2}-[0-9]{2}-[0-9]{4}" placeholder="dd-mm-yyyy" title="Enter date as dd-mm-yyyy" />
           </label>
           <label class="full">
             <span>Address</span>
@@ -318,7 +318,7 @@
           </label>
           <label>
             <span>Birthday</span>
-            <input id="contactBirthDate" type="date" />
+            <input id="contactBirthDate" type="text" inputmode="numeric" maxlength="10" pattern="[0-9]{2}-[0-9]{2}-[0-9]{4}" placeholder="dd-mm-yyyy" title="Enter date as dd-mm-yyyy" />
           </label>
           <div class="paired-fields">
             <label>
@@ -327,7 +327,7 @@
             </label>
             <label>
               <span>Other date</span>
-              <input id="contactImportantDate" type="date" />
+              <input id="contactImportantDate" type="text" inputmode="numeric" maxlength="10" pattern="[0-9]{2}-[0-9]{2}-[0-9]{4}" placeholder="dd-mm-yyyy" title="Enter date as dd-mm-yyyy" />
             </label>
           </div>
           <label>

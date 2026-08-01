@@ -237,6 +237,15 @@ def display_audit_value(value) -> str:
     return text or "blank"
 
 
+def validate_date_range(value: date | None, label: str, min_year: int = 1900, max_year: int = 2100, required: bool = False) -> None:
+    if value is None:
+        if required:
+            raise HTTPException(status_code=400, detail=f"{label} is required")
+        return
+    if value.year < min_year or value.year > max_year:
+        raise HTTPException(status_code=400, detail=f"{label} year must be between {min_year} and {max_year}")
+
+
 def task_change_details(task: Task, data: dict) -> str:
     changes = []
     for field in TASK_AUDIT_FIELDS:
@@ -308,6 +317,8 @@ def normalize_task_data(task_data: TaskCreate | TaskUpdate, session: Session) ->
     data["notes"] = data["notes"].strip()
     if data["start_date"] is None:
         data["start_date"] = date.today()
+    validate_date_range(data["start_date"], "Start date", 2000, 2100, required=True)
+    validate_date_range(data["due_date"], "Due / last date", 2000, 2100, required=True)
     if data["due_date"] < data["start_date"]:
         raise HTTPException(status_code=400, detail="Due date cannot be before start date")
     if data["repeat_type"] == "None":
@@ -548,6 +559,7 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Ses
     data["whatsapp"] = normalize_phone_number(data["whatsapp"], "WhatsApp")
     data["email"] = normalize_email(data["email"])
     data["gst_no"] = normalize_gst_no(data["gst_no"])
+    validate_date_range(data["birth_date"], "Birth date", 1900, 2100)
     return data
 
 
@@ -584,6 +596,8 @@ def normalize_contact_data(contact_data: ContactCreate | ContactUpdate) -> dict:
     data["email"] = normalize_email(data["email"])
     data["location_url"] = normalize_url(data["location_url"], "Location URL")
     data["social_profile"] = normalize_url(data["social_profile"], "Social profile")
+    validate_date_range(data["birth_date"], "Birthday", 1900, 2100)
+    validate_date_range(data["important_date"], "Other date", 1900, 2100)
     return data
 
 
@@ -634,8 +648,8 @@ def template_date(value: date | datetime | None) -> str:
     if not value:
         return ""
     if isinstance(value, datetime):
-        return value.date().isoformat()
-    return value.isoformat()
+        value = value.date()
+    return value.strftime("%d-%m-%Y")
 
 
 def client_template_values(client: Client) -> dict[str, object]:

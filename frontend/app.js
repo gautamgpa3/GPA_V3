@@ -183,7 +183,9 @@ function toDate(value) {
   const iso = String(value).slice(0, 10);
   const [year, month, day] = iso.split("-").map(Number);
   if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
 }
 
 function dateISO(date) {
@@ -213,10 +215,61 @@ function addDays(iso, days) {
   return dateISO(date);
 }
 
-function formatDate(iso) {
+function isoToDisplayDate(iso) {
   const date = toDate(iso);
-  if (!date) return "No date";
-  return date.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+  if (!date) return "";
+  return `${String(date.getDate()).padStart(2, "0")}-${String(date.getMonth() + 1).padStart(2, "0")}-${date.getFullYear()}`;
+}
+
+function displayDateToISO(value, label, options = {}) {
+  const text = String(value || "").trim();
+  if (!text) {
+    if (options.required) throw new Error(`${label} is required in dd-mm-yyyy format.`);
+    return null;
+  }
+  const match = text.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (!match) throw new Error(`${label} must be in dd-mm-yyyy format.`);
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const year = Number(match[3]);
+  const minYear = options.minYear || 1900;
+  const maxYear = options.maxYear || 2100;
+  if (year < minYear || year > maxYear) throw new Error(`${label} year must be between ${minYear} and ${maxYear}.`);
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    throw new Error(`${label} is not a valid calendar date.`);
+  }
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function importedDateToISO(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^\d{2}-\d{2}-\d{4}$/.test(text)) {
+    try {
+      return displayDateToISO(text, "Imported date") || "";
+    } catch (error) {
+      return "";
+    }
+  }
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch && toDate(text)) return text;
+  const compactMatch = text.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if (compactMatch) {
+    const iso = `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}`;
+    return toDate(iso) ? iso : "";
+  }
+  return "";
+}
+
+function normalizeDateTyping(field) {
+  const digits = field.value.replace(/\D/g, "").slice(0, 8);
+  const parts = [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean);
+  field.value = parts.join("-");
+}
+
+function formatDate(iso) {
+  return isoToDisplayDate(iso) || "No date";
 }
 
 function formatTimestamp(value) {
@@ -225,22 +278,17 @@ function formatTimestamp(value) {
   const localMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?$/);
   if (localMatch) {
     const [, year, month, day, hour, minute] = localMatch;
-    const monthName = new Intl.DateTimeFormat("en-IN", { month: "short", timeZone: LOCAL_TIME_ZONE }).format(
-      new Date(Number(year), Number(month) - 1, 1)
-    );
     const hourNumber = Number(hour);
     const displayHour = hourNumber % 12 || 12;
     const period = hourNumber >= 12 ? "PM" : "AM";
-    return `${day} ${monthName} ${year}, ${displayHour}:${minute} ${period}`;
+    return `${day}-${month}-${year}, ${displayHour}:${minute} ${period}`;
   }
 
   const parsed = new Date(text);
   if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleString("en-IN", {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone: LOCAL_TIME_ZONE,
-  });
+  const dateText = isoToDisplayDate(dateISO(parsed));
+  const timeText = parsed.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: LOCAL_TIME_ZONE });
+  return `${dateText}, ${timeText}`;
 }
 
 function escapeHtml(value = "") {
@@ -372,7 +420,7 @@ async function api(path, options = {}) {
     let message = detail;
     try {
       message = JSON.parse(detail).detail || detail;
-    } catch {
+    } catch (error) {
       message = detail;
     }
     throw new Error(message || `Request failed: ${response.status}`);
@@ -397,7 +445,7 @@ async function authStatus() {
   try {
     const response = await api(API_AUTH_STATUS_URL);
     return Boolean(response.authenticated);
-  } catch {
+  } catch (error) {
     return false;
   }
 }
@@ -1552,8 +1600,8 @@ function contactPayload() {
     company: els.contactFields.company.value.trim(),
     address: els.contactFields.address.value.trim(),
     location_url: els.contactFields.location_url.value.trim(),
-    birth_date: els.contactFields.birth_date.value || null,
-    important_date: els.contactFields.important_date.value || null,
+    birth_date: displayDateToISO(els.contactFields.birth_date.value, "Birthday") || null,
+    important_date: displayDateToISO(els.contactFields.important_date.value, "Other date") || null,
     important_date_label: els.contactFields.important_date_label.value.trim(),
     related_name: els.contactFields.related_name.value.trim(),
     social_profile: els.contactFields.social_profile.value.trim(),
@@ -1582,6 +1630,10 @@ function openContactDialog(contact = null) {
     data.last_name = parts.join(" ");
   }
   Object.entries(els.contactFields).forEach(([key, field]) => {
+    if (key === "birth_date" || key === "important_date") {
+      field.value = isoToDisplayDate(data[key]);
+      return;
+    }
     field.value = data[key] ?? "";
   });
   els.contactDialog.showModal();
@@ -1590,7 +1642,13 @@ function openContactDialog(contact = null) {
 
 async function saveContactForm(event) {
   event.preventDefault();
-  const payload = contactPayload();
+  let payload;
+  try {
+    payload = contactPayload();
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
   const error = validateContactPayload(payload);
   if (error) {
     window.alert(error);
@@ -2092,6 +2150,7 @@ function openTaskDialog(task = null) {
   const data = { ...defaults, ...(task || {}) };
   Object.entries(els.fields).forEach(([key, field]) => {
     if (field.type === "checkbox") field.checked = Boolean(data[key]);
+    else if (key === "start_date" || key === "due_date") field.value = isoToDisplayDate(data[key]);
     else field.value = data[key] ?? "";
   });
   els.dialog.showModal();
@@ -2099,6 +2158,9 @@ function openTaskDialog(task = null) {
 }
 
 function readForm() {
+  const startDate = displayDateToISO(els.fields.start_date.value, "Start date", { required: true, minYear: 2000, maxYear: 2100 });
+  const dueDate = displayDateToISO(els.fields.due_date.value, "Due / last date", { required: true, minYear: 2000, maxYear: 2100 });
+  if (diffDays(dueDate, startDate) < 0) throw new Error("Due / last date cannot be before Start date.");
   return {
     title: els.fields.title.value.trim(),
     description: els.fields.description.value.trim(),
@@ -2108,8 +2170,8 @@ function readForm() {
     priority: els.fields.priority.value,
     status: els.fields.status.value,
     client_id: els.fields.client_id.value ? Number(els.fields.client_id.value) : null,
-    start_date: els.fields.start_date.value || todayISO(),
-    due_date: els.fields.due_date.value || null,
+    start_date: startDate,
+    due_date: dueDate,
     reminder: els.fields.reminder.checked,
     repeat_type: els.fields.repeat_type.value || "None",
     repeat_every: Number(els.fields.repeat_every.value || 1),
@@ -2121,7 +2183,30 @@ function readForm() {
 }
 
 function currentTaskDraft() {
-  return { id: els.fields.id.value, ...readForm() };
+  try {
+    return { id: els.fields.id.value, ...readForm() };
+  } catch (error) {
+    return {
+      id: els.fields.id.value,
+      title: els.fields.title.value.trim(),
+      description: els.fields.description.value.trim(),
+      topic: els.fields.topic.value.trim(),
+      task_time: els.fields.task_time.value,
+      category: selectedTaskCategory(),
+      priority: els.fields.priority.value,
+      status: els.fields.status.value,
+      client_id: els.fields.client_id.value ? Number(els.fields.client_id.value) : null,
+      start_date: todayISO(),
+      due_date: todayISO(),
+      reminder: els.fields.reminder.checked,
+      repeat_type: els.fields.repeat_type.value || "None",
+      repeat_every: Number(els.fields.repeat_every.value || 1),
+      owner: els.fields.owner.value.trim() || "Me",
+      issue: els.fields.issue.value.trim(),
+      notes: els.fields.notes.value.trim(),
+      archived: false,
+    };
+  }
 }
 
 function resumeTaskDraft() {
@@ -2133,7 +2218,23 @@ function resumeTaskDraft() {
 }
 
 function currentClientDraft() {
-  return { id: els.clientFields.id.value, ...readClientForm() };
+  try {
+    return { id: els.clientFields.id.value, ...readClientForm() };
+  } catch (error) {
+    return {
+      id: els.clientFields.id.value,
+      name: els.clientFields.name.value.trim(),
+      category: els.clientFields.category.value || "Client",
+      phone: phoneDigits(els.clientFields.phone.value),
+      whatsapp: phoneDigits(els.clientFields.whatsapp.value),
+      email: emailValue(els.clientFields.email.value),
+      address: els.clientFields.address.value.trim(),
+      gst_no: gstNumber(els.clientFields.gst_no.value),
+      work_scope: els.clientFields.work_scope.value.trim(),
+      birth_date: "",
+      active: true,
+    };
+  }
 }
 
 function resumeClientDraft() {
@@ -2182,6 +2283,10 @@ function openClientDialog(client = null) {
   };
   const data = { ...defaults, ...(client || {}) };
   Object.entries(els.clientFields).forEach(([key, field]) => {
+    if (key === "birth_date") {
+      field.value = isoToDisplayDate(data[key]);
+      return;
+    }
     field.value = data[key] ?? "";
   });
   els.clientDialog.showModal();
@@ -2198,14 +2303,20 @@ function readClientForm() {
     address: els.clientFields.address.value.trim(),
     gst_no: gstNumber(els.clientFields.gst_no.value),
     work_scope: els.clientFields.work_scope.value.trim(),
-    birth_date: els.clientFields.birth_date.value || null,
+    birth_date: displayDateToISO(els.clientFields.birth_date.value, "Birth date") || null,
     active: true,
   };
 }
 
 async function saveClientForm(event) {
   event.preventDefault();
-  const payload = readClientForm();
+  let payload;
+  try {
+    payload = readClientForm();
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
   if (!payload.name) return;
   if (!isTenDigitPhone(payload.phone)) {
     window.alert("Mobile / SMS must be exactly 10 digits.");
@@ -2483,10 +2594,20 @@ function formatTemplateSelection(templateKey, format) {
 
 async function saveForm(event) {
   event.preventDefault();
-  const payload = readForm();
+  let payload;
+  try {
+    payload = readForm();
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
   if (!payload.title) return;
   const id = els.fields.id.value;
   const previousTask = id ? state.tasks.find((task) => String(task.id) === String(id)) : null;
+  if (!["Completed", "Cancelled"].includes(payload.status) && diffDays(payload.due_date) < 0) {
+    const days = Math.abs(diffDays(payload.due_date));
+    if (!window.confirm(`Due / last date ${formatDate(payload.due_date)} is already lapsed by ${days} day(s). This task will appear in Overdue. Continue?`)) return;
+  }
   if (!window.confirm(`${id ? "Edit" : "Add"} task "${payload.title}"?`)) return;
   const savedTask = normalizeTask(await api(id ? `${API_TASKS_URL}/${id}` : API_TASKS_URL, {
     method: id ? "PUT" : "POST",
@@ -2702,8 +2823,8 @@ function parseCsvContacts(text) {
       company: row.company || row.organization || "",
       address: row.address || "",
       location_url: row["location url"] || row.location || "",
-      birth_date: row.birthday || row["birth date"] || "",
-      important_date: row["other date"] || row["important date"] || "",
+      birth_date: importedDateToISO(row.birthday || row["birth date"] || ""),
+      important_date: importedDateToISO(row["other date"] || row["important date"] || ""),
       important_date_label: row["other date label"] || row["important date label"] || "",
       related_name: row["related name"] || row.related || "",
       social_profile: row["social profile"] || row.profile || "",
@@ -2730,7 +2851,7 @@ function parseVcfContacts(text) {
       const email = valueFor(["EMAIL"]).toLowerCase();
       const company = valueFor(["ORG"]);
       const address = valueFor(["ADR"]).replace(/;/g, " ").replace(/\s+/g, " ").trim();
-      const birth_date = valueFor(["BDAY"]);
+      const birth_date = importedDateToISO(valueFor(["BDAY"]));
       const social_profile = valueFor(["X-SOCIALPROFILE", "URL"]);
       const notes = valueFor(["NOTE"]);
       return { name, first_name, last_name, phone, phone_label: "Mobile", whatsapp: "", whatsapp_label: "WhatsApp", email, company, address, birth_date, social_profile, notes };
@@ -2741,7 +2862,7 @@ function parseVcfContacts(text) {
 function exportContactsCSV() {
   const headers = ["Name", "First Name", "Last Name", "Phone Tag", "Phone", "WhatsApp", "Email", "Company", "Address", "Location URL", "Birthday", "Other Date Label", "Other Date", "Related Name", "Social Profile", "Notes"];
   const rows = state.contacts.map((contact) =>
-    [contact.name, contact.first_name, contact.last_name, contact.phone_label, contact.phone, contact.whatsapp, contact.email, contact.company, contact.address, contact.location_url, contact.birth_date, contact.important_date_label, contact.important_date, contact.related_name, contact.social_profile, contact.notes].map(csvCell).join(",")
+    [contact.name, contact.first_name, contact.last_name, contact.phone_label, contact.phone, contact.whatsapp, contact.email, contact.company, contact.address, contact.location_url, dateTemplateValue(contact.birth_date), contact.important_date_label, dateTemplateValue(contact.important_date), contact.related_name, contact.social_profile, contact.notes].map(csvCell).join(",")
   );
   downloadTextFile(`gpa-v3-contacts-${todayISO()}.csv`, [headers.map(csvCell).join(","), ...rows].join("\n"), "text/csv;charset=utf-8");
 }
@@ -2833,10 +2954,10 @@ function exportCSV() {
       client?.whatsapp,
       client?.email,
       client?.gst_no,
-      client?.birth_date,
+      dateTemplateValue(client?.birth_date),
       client?.work_scope,
-      task.start_date,
-      task.due_date,
+      formatDate(task.start_date),
+      formatDate(task.due_date),
       task.reminder ? "Yes" : "No",
       task.repeat_type,
       task.repeat_every,
@@ -2889,10 +3010,10 @@ function exportCSV() {
       client?.whatsapp,
       client?.email,
       client?.gst_no,
-      client?.birth_date,
+      dateTemplateValue(client?.birth_date),
       client?.work_scope,
-      task.start_date || "",
-      task.due_date || "",
+      task.start_date ? formatDate(task.start_date) : "",
+      task.due_date ? formatDate(task.due_date) : "",
       task.reminder === undefined ? "" : task.reminder ? "Yes" : "No",
       task.repeat_type || "",
       task.repeat_every || "",
@@ -2976,6 +3097,9 @@ function bindEvents() {
   });
   [els.contactFields.phone, els.contactFields.whatsapp].forEach((field) => {
     field.addEventListener("input", () => normalizePhoneInput(field));
+  });
+  [els.fields.start_date, els.fields.due_date, els.clientFields.birth_date, els.contactFields.birth_date, els.contactFields.important_date].forEach((field) => {
+    field.addEventListener("input", () => normalizeDateTyping(field));
   });
   els.clientFields.gst_no.addEventListener("input", () => normalizeGstInput(els.clientFields.gst_no));
   els.scheduleForm.addEventListener("submit", saveScheduleForm);
