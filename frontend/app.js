@@ -642,8 +642,66 @@ function overdueTasks() {
   return openTasks().filter((task) => taskDerived(task).overdue);
 }
 
+function searchQuery() {
+  return state.search.trim().toLowerCase();
+}
+
+function matchesSearchText(text, query) {
+  const q = query.trim().toLowerCase();
+  if (!q) return true;
+  const haystack = String(text || "").toLowerCase();
+  return q.split(/\s+/).filter(Boolean).every((term) => haystack.includes(term));
+}
+
+function clientSearchText(client = {}) {
+  return [
+    client.name,
+    client.category,
+    client.phone,
+    client.whatsapp,
+    client.email,
+    client.address,
+    client.gst_no,
+    client.work_scope,
+    client.birth_date,
+    client.notes,
+  ].join(" ");
+}
+
+function taskSearchText(task = {}) {
+  const client = clientForTask(task);
+  const contact = client ? contactForClient(client) : null;
+  return [
+    task.title,
+    task.description,
+    task.category,
+    task.priority,
+    task.status,
+    task.task_time,
+    task.topic,
+    task.start_date,
+    task.due_date,
+    task.repeat_type,
+    task.owner,
+    task.issue,
+    task.notes,
+    clientSearchText(client || {}),
+    contactSearchText(contact || {}),
+  ].join(" ");
+}
+
+function taskMatchesSearch(task, query = searchQuery()) {
+  return matchesSearchText(taskSearchText(task), query);
+}
+
+function filteredClients() {
+  const q = searchQuery();
+  if (!q) return state.clients;
+  return state.clients.filter((client) => matchesSearchText(clientSearchText(client), q));
+}
+
 function filteredTasks() {
-  const q = state.search.trim().toLowerCase();
+  const q = searchQuery();
   return state.tasks
     .filter((task) => {
       if (state.filters.status !== "All" && task.status !== state.filters.status) return false;
@@ -660,7 +718,7 @@ function filteredTasks() {
         if (state.filters.horizon === "This week" && (diffDays(task.due_date) < 0 || diffDays(task.due_date) > 7)) return false;
       }
       if (!q) return true;
-      return [task.title, task.description, task.category, task.owner, task.issue, task.notes].join(" ").toLowerCase().includes(q);
+      return taskMatchesSearch(task, q);
     })
     .sort((a, b) => {
       const ad = taskDerived(a);
@@ -796,7 +854,9 @@ function dashboardMetricTasks(metric) {
     recurring: ["Recurring work", open.filter((task) => task.repeat_type && task.repeat_type !== "None")],
     completed: ["Completed tasks", completedTasks()],
   };
-  return groups[metric] || ["Tasks", []];
+  const [title, tasks] = groups[metric] || ["Tasks", []];
+  const q = searchQuery();
+  return [title, q ? tasks.filter((task) => taskMatchesSearch(task, q)) : tasks];
 }
 
 function showDashboardMetric(metric) {
@@ -842,15 +902,18 @@ function metricDetailsPanel() {
 
 function renderDashboard() {
   const stats = getStats();
-  const open = openTasks();
-  const today = todaysPendingTasks();
-  const pending = pendingTasks();
-  const overdue = overdueTasks();
+  const q = searchQuery();
+  const applySearch = (tasks) => (q ? tasks.filter((task) => taskMatchesSearch(task, q)) : tasks);
+  const open = applySearch(openTasks());
+  const today = applySearch(todaysPendingTasks());
+  const pending = applySearch(pendingTasks());
+  const overdue = applySearch(overdueTasks());
   const soon = pending.filter((task) => diffDays(task.due_date) > 0 && diffDays(task.due_date) <= 7 && !today.includes(task));
   const blocked = open.filter((task) => task.status === "Blocked" || task.issue);
-  const completed = completedTasks();
+  const completed = applySearch(completedTasks());
 
   els.views.dashboard.innerHTML = `
+    ${q ? `<div class="task-note">Search active: ${escapeHtml(state.search)}. Dashboard lists below are filtered.</div>` : ""}
     <div class="metric-grid">
       ${metricCard("Today's pending", stats.today, "today")}
       ${metricCard("Due today", stats.dueToday, "dueToday")}
@@ -935,6 +998,7 @@ function renderTasks() {
 }
 
 function renderCalendar() {
+  const q = searchQuery();
   const base = new Date();
   const start = new Date(base.getFullYear(), base.getMonth(), 1);
   const gridStart = new Date(start);
@@ -944,7 +1008,7 @@ function renderCalendar() {
     const date = new Date(gridStart);
     date.setDate(gridStart.getDate() + index);
     const iso = dateISO(date);
-    const tasks = state.tasks.filter((task) => task.due_date === iso);
+    const tasks = state.tasks.filter((task) => task.due_date === iso && taskMatchesSearch(task, q));
     cells.push(`
       <div class="day-cell ${iso === todayISO() ? "today" : ""}">
         <div class="day-num">${date.toLocaleDateString(undefined, { weekday: "short", day: "2-digit" })}</div>
@@ -1325,16 +1389,18 @@ function renderMessageSchedules() {
 }
 
 function renderClients() {
+  const clients = filteredClients();
   els.views.clients.innerHTML = `
     ${renderDueClientMessages()}
     ${renderMessageSchedules()}
     <div class="panel">
       <div class="panel-head">
         <h3>Clients</h3>
+        <span class="mini">${clients.length} of ${state.clients.length}</span>
         <button class="primary-button" data-action="add-client">Add client</button>
       </div>
       <div class="client-grid">
-        ${state.clients
+        ${clients
           .map((client) => {
             const blockers = clientBlockers(client.id);
             const taskNotes = clientTaskNotes(client.id);
@@ -1368,7 +1434,7 @@ function renderClients() {
               </article>
             `;
           })
-          .join("") || renderTaskList([], "No clients added yet")}
+          .join("") || renderTaskList([], searchQuery() ? "No clients match this search" : "No clients added yet")}
       </div>
     </div>
   `;
@@ -1390,9 +1456,13 @@ function contactSearchText(contact) {
 }
 
 function filteredContacts() {
-  const q = state.contactSearch.trim().toLowerCase();
-  if (!q) return state.contacts;
-  return state.contacts.filter((contact) => contactSearchText(contact).includes(q));
+  const contactQuery = state.contactSearch.trim().toLowerCase();
+  const globalQuery = searchQuery();
+  return state.contacts.filter(
+    (contact) =>
+      matchesSearchText(contactSearchText(contact), contactQuery) &&
+      matchesSearchText(contactSearchText(contact), globalQuery)
+  );
 }
 
 function contactDateMeta(label, value) {
@@ -1460,7 +1530,7 @@ function renderContacts() {
               </article>
             `;
           })
-          .join("") || renderTaskList([], state.contactSearch ? "No contacts match this search" : "No contacts saved yet")}
+          .join("") || renderTaskList([], state.contactSearch || searchQuery() ? "No contacts match this search" : "No contacts saved yet")}
       </div>
     </div>
   `;
