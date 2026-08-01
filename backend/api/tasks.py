@@ -1057,7 +1057,7 @@ def task_text(task: Task) -> str:
 
 
 def task_identity_text(task: Task) -> str:
-    return " ".join([task.title or "", task.description or "", task.topic or ""])
+    return " ".join([task.title or "", task.topic or ""])
 
 
 def is_itr_task(task: Task) -> bool:
