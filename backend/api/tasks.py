@@ -1,7 +1,10 @@
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from threading import Lock, Thread
-from re import fullmatch, search, sub
+from html import unescape
+from re import finditer, fullmatch, search, sub
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +27,8 @@ router = APIRouter(prefix="/api", tags=["Tasks"])
 
 GOOGLE_SYNC_JOBS: dict[str, dict] = {}
 GOOGLE_SYNC_LOCK = Lock()
+INCOME_TAX_CALENDAR_URL = "https://wmstatic-prd.incometaxindia.gov.in/en/web/guest/tax-calendar"
+ITR_TERMS = ("itr", "income tax return", "return of income", "income-tax return")
 
 
 class TaskBase(BaseModel):
@@ -1028,6 +1033,170 @@ def task_contains(task: Task, *terms: str) -> bool:
     return any(term.lower() in haystack for term in terms)
 
 
+def task_text(task: Task) -> str:
+    return " ".join(
+        [
+            task.title or "",
+            task.description or "",
+            task.category or "",
+            task.topic or "",
+            task.issue or "",
+            task.notes or "",
+        ]
+    )
+
+
+def is_itr_task(task: Task) -> bool:
+    return any(term in task_text(task).lower() for term in ITR_TERMS)
+
+
+def clean_html_text(html: str) -> str:
+    text = sub(r"<script[\s\S]*?</script>", " ", html, flags=2)
+    text = sub(r"<style[\s\S]*?</style>", " ", text, flags=2)
+    text = sub(r"<[^>]+>", " ", text)
+    return sub(r"\s+", " ", unescape(text)).strip()
+
+
+def fetch_official_income_tax_text() -> str:
+    request = Request(
+        INCOME_TAX_CALENDAR_URL,
+        headers={
+            "User-Agent": "GPA-V3/1.0 (+https://gpa.cagautamacharya.com)",
+            "Accept": "text/html,application/xhtml+xml",
+        },
+    )
+    try:
+        with urlopen(request, timeout=45) as response:
+            return clean_html_text(response.read().decode("utf-8", errors="ignore"))
+    except (HTTPError, URLError, TimeoutError) as error:
+        raise RuntimeError(f"Could not read official Income Tax Calendar: {error}") from error
+
+
+MONTH_LOOKUP = {
+    "jan": 1,
+    "january": 1,
+    "feb": 2,
+    "february": 2,
+    "mar": 3,
+    "march": 3,
+    "apr": 4,
+    "april": 4,
+    "may": 5,
+    "jun": 6,
+    "june": 6,
+    "jul": 7,
+    "july": 7,
+    "aug": 8,
+    "august": 8,
+    "sep": 9,
+    "sept": 9,
+    "september": 9,
+    "oct": 10,
+    "october": 10,
+    "nov": 11,
+    "november": 11,
+    "dec": 12,
+    "december": 12,
+}
+
+
+def parse_due_date_text(value: str) -> date | None:
+    iso_match = search(r"\b(20\d{2})-(\d{1,2})-(\d{1,2})\b", value)
+    if iso_match:
+        return date(int(iso_match.group(1)), int(iso_match.group(2)), int(iso_match.group(3)))
+    text_match = search(r"\b(\d{1,2})(?:st|nd|rd|th)?[-\s]+([A-Za-z]{3,9})[-,\s]+(20\d{2})\b", value, flags=2)
+    if text_match:
+        month = MONTH_LOOKUP.get(text_match.group(2).lower())
+        if month:
+            return date(int(text_match.group(3)), month, int(text_match.group(1)))
+    return None
+
+
+def official_itr_due_date_for_year(year: int) -> tuple[date | None, str]:
+    official_text = fetch_official_income_tax_text()
+    candidates: list[tuple[date, str]] = []
+    for match in finditer(r"\b(?:20\d{2}-\d{1,2}-\d{1,2}|\d{1,2}(?:st|nd|rd|th)?[-\s]+[A-Za-z]{3,9}[-,\s]+20\d{2})\b", official_text, flags=2):
+        found = parse_due_date_text(match.group(0))
+        if not found or found.year != year:
+            continue
+        window = official_text[max(0, match.start() - 220) : match.end() + 220].lower()
+        if any(term in window for term in ITR_TERMS):
+            candidates.append((found, window))
+    if not candidates:
+        return None, "No clear ITR due date found on the official Income Tax Calendar page."
+    candidates.sort(key=lambda item: item[0])
+    selected, context = candidates[-1]
+    return selected, context[:320]
+
+
+def sync_itr_task_dates(session: Session, dry_run: bool = False) -> dict:
+    today = date.today()
+    open_itr_tasks = [task for task in active_tasks(session) if is_itr_task(task)]
+    if not open_itr_tasks:
+        return {"success": True, "updated": 0, "review_required": 0, "tasks": [], "message": "No open ITR tasks found."}
+
+    due_cache: dict[int, tuple[date | None, str]] = {}
+    results = []
+    updated = 0
+    review_required = 0
+    for task in open_itr_tasks:
+        target_year = (task.due_date or task.start_date or today).year
+        if target_year not in due_cache:
+            due_cache[target_year] = official_itr_due_date_for_year(target_year)
+        official_due, source_context = due_cache[target_year]
+        start_date = date(target_year, 6, 1)
+        result = {
+            "id": task.id,
+            "uuid": task.uuid,
+            "title": task.title,
+            "old_start_date": task.start_date.isoformat() if task.start_date else "",
+            "old_due_date": task.due_date.isoformat() if task.due_date else "",
+            "new_start_date": start_date.isoformat(),
+            "new_due_date": official_due.isoformat() if official_due else "",
+            "source": INCOME_TAX_CALENDAR_URL,
+            "source_context": source_context,
+            "updated": False,
+            "review_required": official_due is None,
+        }
+        if official_due is None:
+            review_required += 1
+            results.append(result)
+            continue
+        if not dry_run:
+            task.start_date = start_date
+            task.due_date = official_due
+            task.repeat_type = "Yearly"
+            task.repeat_every = 1
+            task.reminder = True
+            task.updated_at = now()
+            session.add(task)
+            log_activity(
+                session,
+                "UPDATED",
+                "task",
+                f"Synced ITR dates from official Income Tax Calendar: {task.title}",
+                task.id,
+                task.uuid,
+                f"Start Date -> {start_date.isoformat()}; Due Date -> {official_due.isoformat()}",
+            )
+        updated += 1
+        result["updated"] = not dry_run
+        results.append(result)
+
+    if not dry_run:
+        session.commit()
+    return {
+        "success": review_required == 0,
+        "updated": updated if not dry_run else 0,
+        "would_update": updated if dry_run else 0,
+        "review_required": review_required,
+        "dry_run": dry_run,
+        "source": INCOME_TAX_CALENDAR_URL,
+        "tasks": results,
+        "message": f"{'Previewed' if dry_run else 'Updated'} {updated} ITR task(s). {review_required} need manual due-date review.",
+    }
+
+
 def build_briefing(session: Session) -> dict:
     today = date.today()
     tomorrow = today + timedelta(days=1)
@@ -1697,6 +1866,14 @@ def get_briefing(session: Session = Depends(get_session)):
     return build_briefing(session)
 
 
+@router.post("/compliance/itr/sync-dates")
+def sync_itr_dates(dry_run: bool = False, session: Session = Depends(get_session)):
+    try:
+        return sync_itr_task_dates(session, dry_run=dry_run)
+    except RuntimeError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
+
+
 @router.post("/tasks")
 def create_task(task_data: TaskCreate, session: Session = Depends(get_session)):
     data = normalize_task_data(task_data, session)
@@ -1814,6 +1991,21 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
     if lower.startswith("how many") and "pending" in lower:
         count = len([task for task in active_tasks(session) if task_is_pending(task)])
         return {"action": "ANSWER", "message": f"{count} pending task(s) remain."}
+
+    if "itr" in lower and ("sync" in lower or "update" in lower) and ("due date" in lower or "dates" in lower):
+        dry_run = any(term in lower for term in ("preview", "check", "dry run", "dry-run"))
+        try:
+            result = sync_itr_task_dates(session, dry_run=dry_run)
+        except RuntimeError as error:
+            return {
+                "action": "ITR_DATE_SYNC_FAILED",
+                "message": str(error),
+            }
+        return {
+            "action": "ITR_DATE_SYNC",
+            "message": result["message"],
+            "result": result,
+        }
 
     if lower.startswith("complete") or lower.startswith("mark") and "complete" in lower:
         candidates = active_tasks(session)
