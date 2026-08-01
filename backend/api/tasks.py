@@ -1866,6 +1866,7 @@ def get_briefing(session: Session = Depends(get_session)):
     return build_briefing(session)
 
 
+@router.get("/compliance/itr/sync-dates")
 @router.post("/compliance/itr/sync-dates")
 def sync_itr_dates(dry_run: bool = False, session: Session = Depends(get_session)):
     try:
