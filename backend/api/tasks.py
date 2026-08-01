@@ -900,6 +900,17 @@ def send_task_stage_whatsapp(session: Session, task: Task, stage: str, update_de
 def parse_assistant_date(text: str) -> date:
     lower = text.lower()
     today = date.today()
+    ay_match = search(r"\bay\s*(20\d{2})\s*[-/]\s*(\d{2})\b", lower)
+    year_hint = int(ay_match.group(1)) if ay_match else None
+    named_date = search(r"\b(?:before|by|due|on)\s+(\d{1,2})(?:st|nd|rd|th)?\s+([a-z]{3,9})(?:\s+(20\d{2}))?\b", lower)
+    if named_date:
+        month = MONTH_LOOKUP.get(named_date.group(2))
+        year = int(named_date.group(3) or year_hint or today.year)
+        if month:
+            parsed = date(year, month, int(named_date.group(1)))
+            if not named_date.group(3) and not year_hint and parsed < today:
+                parsed = date(year + 1, month, int(named_date.group(1)))
+            return parsed
     if "tomorrow" in lower:
         return today + timedelta(days=1)
     if "next monday" in lower:
@@ -913,10 +924,16 @@ def parse_assistant_date(text: str) -> date:
 
 def assistant_task_title(text: str) -> str:
     cleaned = text.strip()
-    for prefix in ("remind me to", "remind me", "schedule", "add", "create task"):
+    if any(term in cleaned.lower() for term in ITR_TERMS):
+        if "group itr" in cleaned.lower():
+            return "GROUP ITR"
+        if "income tax return" in cleaned.lower() or "inocme tax return" in cleaned.lower():
+            return "Income Tax Return"
+        return "ITR"
+    for prefix in ("remind me to", "remind me", "schedule", "add", "create task", "file"):
         if cleaned.lower().startswith(prefix):
             cleaned = cleaned[len(prefix):].strip()
-    for marker in (" tomorrow", " next monday", " after ", " at ", " by ", " time ", " topic ", " regarding ", " about ", " details ", " note ", " notes ", " high priority", " urgent", " normal priority", " low priority"):
+    for marker in (" tomorrow", " next monday", " after ", " before ", " due ", " on ", " at ", " by ", " for ay ", " time ", " topic ", " regarding ", " about ", " details ", " note ", " notes ", " high priority", " urgent", " normal priority", " low priority"):
         index = cleaned.lower().find(marker)
         if index >= 0:
             cleaned = cleaned[:index].strip()
@@ -940,6 +957,7 @@ def assistant_should_create_task(text: str) -> bool:
         "add",
         "call",
         "create task",
+        "file",
         "follow up",
         "pay",
         "remind me",
@@ -976,6 +994,9 @@ def assistant_task_time(text: str) -> str:
 
 
 def assistant_topic(text: str) -> str:
+    ay_match = search(r"(?i)\bay\s*(20\d{2}\s*[-/]\s*\d{2})\b", text)
+    if ay_match and any(term in text.lower() for term in ITR_TERMS):
+        return f"AY {sub(r'\\s+', '', ay_match.group(1))}"
     match = search(r"(?i)\b(?:topic|regarding|about)\s+(.+)$", text)
     if not match:
         return ""
@@ -997,6 +1018,18 @@ def assistant_details(text: str) -> str:
         if index >= 0:
             details = details[:index].strip()
     return details[:1000]
+
+
+def assistant_start_date(text: str, due: date) -> date:
+    if any(term in text.lower() for term in ITR_TERMS):
+        return date(due.year, 6, 1)
+    return due
+
+
+def assistant_repeat_type(text: str) -> str:
+    if any(term in text.lower() for term in ITR_TERMS):
+        return "Yearly"
+    return "None"
 
 
 def assistant_client(session: Session, text: str) -> Client | None:
@@ -2080,6 +2113,8 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
         topic = assistant_topic(text)
         task_time = assistant_task_time(text)
         details = assistant_details(text)
+        start = assistant_start_date(lower, due)
+        repeat = assistant_repeat_type(lower)
         data = {
             "title": title,
             "description": "",
@@ -2089,10 +2124,10 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
             "client_id": client.id if client else None,
             "task_time": task_time,
             "topic": topic,
-            "start_date": due,
+            "start_date": start,
             "due_date": due,
             "reminder": True,
-            "repeat_type": "None",
+            "repeat_type": repeat,
             "repeat_every": 1,
             "owner": "Me",
             "issue": "",
