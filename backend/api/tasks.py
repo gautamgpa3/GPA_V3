@@ -911,7 +911,7 @@ def external_match_preview(session: Session, record: ExternalClientRecord) -> di
 
 
 def set_if_allowed(target, field: str, value, overwrite_existing: bool, changes: list[str], prefix: str) -> None:
-    if value in {"", None}:
+    if value is None or value == "":
         return
     current = getattr(target, field)
     if overwrite_existing or not current:
