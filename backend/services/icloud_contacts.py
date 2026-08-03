@@ -13,11 +13,13 @@ from xml.etree import ElementTree
 from sqlmodel import Session, select
 
 from backend.models.activity import ActivityLog
+from backend.models.client import Client
 from backend.models.contact import Contact
 
 
 DEFAULT_SYNC_FILE = "/opt/gpa-v3/secrets/icloud_contacts.env"
 ICLOUD_CARDDAV_ROOT = "https://contacts.icloud.com/"
+PERSONAL_BIRTHDATE_CONSTITUTIONS = {"Individual", "Proprietorship"}
 NS = {
     "d": "DAV:",
     "card": "urn:ietf:params:xml:ns:carddav",
@@ -322,6 +324,21 @@ def contact_conflict(session: Session, contact: ParsedContact, exclude_id: int |
     return None
 
 
+def sync_linked_clients_from_contact(session: Session, contact: Contact) -> None:
+    linked_clients = session.exec(select(Client).where(Client.contact_id == contact.id, Client.active == True)).all()  # noqa: E712
+    for client in linked_clients:
+        client.phone = contact.phone or contact.whatsapp or ""
+        client.whatsapp = contact.whatsapp or contact.phone or ""
+        client.email = contact.email or ""
+        client.address = contact.address or ""
+        if client.constitution == "Proprietorship":
+            client.pan_no = contact.pan_no or ""
+        if client.constitution in PERSONAL_BIRTHDATE_CONSTITUTIONS:
+            client.birth_date = contact.birth_date
+        client.updated_at = datetime.now()
+        session.add(client)
+
+
 def upsert_contacts(session: Session, contacts: list[ParsedContact], dry_run: bool = False) -> dict:
     created = 0
     updated = 0
@@ -353,6 +370,7 @@ def upsert_contacts(session: Session, contacts: list[ParsedContact], dry_run: bo
                 existing.active = True
                 existing.updated_at = datetime.now()
                 session.add(existing)
+                sync_linked_clients_from_contact(session, existing)
             updated += 1
             continue
         if contact_conflict(session, item):

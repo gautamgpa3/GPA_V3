@@ -705,6 +705,21 @@ def normalize_contact_data(contact_data: ContactCreate | ContactUpdate) -> dict:
     return data
 
 
+def sync_linked_clients_from_contact(session: Session, contact: Contact) -> None:
+    linked_clients = session.exec(select(Client).where(Client.contact_id == contact.id, Client.active == True)).all()  # noqa: E712
+    for client in linked_clients:
+        client.phone = contact.phone or contact.whatsapp or ""
+        client.whatsapp = contact.whatsapp or contact.phone or ""
+        client.email = contact.email or ""
+        client.address = contact.address or ""
+        if client.constitution == "Proprietorship":
+            client.pan_no = contact.pan_no or ""
+        if client.constitution in PERSONAL_BIRTHDATE_CONSTITUTIONS:
+            client.birth_date = contact.birth_date
+        client.updated_at = now()
+        session.add(client)
+
+
 def normalize_schedule_data(schedule_data: MessageScheduleCreate | MessageScheduleUpdate, session: Session) -> dict:
     data = schedule_data.model_dump()
     data["name"] = data["name"].strip()
@@ -1787,6 +1802,7 @@ def create_contact(contact_data: ContactCreate, session: Session = Depends(get_s
         inactive_contact.active = True
         inactive_contact.updated_at = now()
         session.add(inactive_contact)
+        sync_linked_clients_from_contact(session, inactive_contact)
         log_activity(session, "RESTORED", "contact", f"Restored contact: {inactive_contact.name}", inactive_contact.id)
         session.commit()
         session.refresh(inactive_contact)
@@ -1794,6 +1810,7 @@ def create_contact(contact_data: ContactCreate, session: Session = Depends(get_s
     contact = Contact(**data, updated_at=now())
     session.add(contact)
     session.flush()
+    sync_linked_clients_from_contact(session, contact)
     log_activity(session, "CREATED", "contact", f"Added contact: {contact.name}", contact.id)
     session.commit()
     session.refresh(contact)
@@ -1811,6 +1828,7 @@ def update_contact(contact_id: int, contact_data: ContactUpdate, session: Sessio
         setattr(contact, field, value)
     contact.updated_at = now()
     session.add(contact)
+    sync_linked_clients_from_contact(session, contact)
     log_activity(session, "UPDATED", "contact", f"Updated contact: {contact.name}", contact.id)
     session.commit()
     session.refresh(contact)
@@ -1861,6 +1879,7 @@ def import_contacts(import_data: ContactImport, session: Session = Depends(get_s
             existing.active = True
             existing.updated_at = now()
             session.add(existing)
+            sync_linked_clients_from_contact(session, existing)
             updated += 1
             continue
         if not data["phone"] and not data["whatsapp"] and not data["email"]:

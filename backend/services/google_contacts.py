@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from backend.models.activity import ActivityLog
+from backend.models.client import Client
 from backend.models.contact import Contact
 
 
@@ -20,6 +21,7 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 PEOPLE_CONNECTIONS_URL = "https://people.googleapis.com/v1/people/me/connections"
 PEOPLE_CREATE_CONTACT_URL = "https://people.googleapis.com/v1/people:createContact"
 PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,biographies,birthdays,events,relations,urls,metadata"
+PERSONAL_BIRTHDATE_CONSTITUTIONS = {"Individual", "Proprietorship"}
 
 
 @dataclass
@@ -294,26 +296,41 @@ def release_inactive_google_conflicts(session: Session, target: Contact, google_
 
 def apply_google_contact(contact: Contact, item: ParsedGoogleContact) -> None:
     contact.name = item.name or contact.name
-    contact.first_name = item.first_name
-    contact.last_name = item.last_name
-    contact.phone = item.phone
-    contact.phone_label = item.phone_label or "Mobile"
-    contact.whatsapp = item.whatsapp or item.phone
-    contact.whatsapp_label = item.whatsapp_label or "WhatsApp"
-    contact.email = item.email
-    contact.company = item.company
-    contact.address = item.address
-    contact.location_url = item.location_url
-    contact.birth_date = item.birth_date
-    contact.important_date = item.important_date
-    contact.important_date_label = item.important_date_label
-    contact.related_name = item.related_name
-    contact.social_profile = item.social_profile
-    contact.notes = item.notes
+    contact.first_name = item.first_name or contact.first_name
+    contact.last_name = item.last_name or contact.last_name
+    contact.phone = item.phone or contact.phone
+    contact.phone_label = item.phone_label or contact.phone_label or "Mobile"
+    contact.whatsapp = item.whatsapp or item.phone or contact.whatsapp
+    contact.whatsapp_label = item.whatsapp_label or contact.whatsapp_label or "WhatsApp"
+    contact.email = item.email or contact.email
+    contact.company = item.company or contact.company
+    contact.address = item.address or contact.address
+    contact.location_url = item.location_url or contact.location_url
+    contact.birth_date = item.birth_date or contact.birth_date
+    contact.important_date = item.important_date or contact.important_date
+    contact.important_date_label = item.important_date_label or contact.important_date_label
+    contact.related_name = item.related_name or contact.related_name
+    contact.social_profile = item.social_profile or contact.social_profile
+    contact.notes = item.notes or contact.notes
     contact.google_resource_name = item.google_resource_name or contact.google_resource_name
     contact.google_etag = item.google_etag or contact.google_etag
     contact.active = True
     contact.updated_at = datetime.now()
+
+
+def sync_linked_clients_from_contact(session: Session, contact: Contact) -> None:
+    linked_clients = session.exec(select(Client).where(Client.contact_id == contact.id, Client.active == True)).all()  # noqa: E712
+    for client in linked_clients:
+        client.phone = contact.phone or contact.whatsapp or ""
+        client.whatsapp = contact.whatsapp or contact.phone or ""
+        client.email = contact.email or ""
+        client.address = contact.address or ""
+        if client.constitution == "Proprietorship":
+            client.pan_no = contact.pan_no or ""
+        if client.constitution in PERSONAL_BIRTHDATE_CONSTITUTIONS:
+            client.birth_date = contact.birth_date
+        client.updated_at = datetime.now()
+        session.add(client)
 
 
 def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact], dry_run: bool = False) -> dict:
@@ -337,6 +354,7 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
                 release_inactive_google_conflicts(session, existing, item)
                 apply_google_contact(existing, item)
                 session.add(existing)
+                sync_linked_clients_from_contact(session, existing)
             updated += 1
             continue
         if contact_conflict(session, item):
