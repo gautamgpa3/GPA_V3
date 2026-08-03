@@ -1,0 +1,251 @@
+param(
+    [ValidateSet("Discover", "AutoExport", "Export", "Push")]
+    [string]$Mode = "Discover",
+    [string]$ServerInstance = "(local)\compuoffice",
+    [string]$Database = "CompuOffice",
+    [string]$QueryFile = "",
+    [string]$OutputPath = ".\computax_clients.json",
+    [int]$Limit = 5000,
+    [string]$GpaUrl = "",
+    [string]$GpaUsername = "",
+    [string]$GpaPassword = ""
+)
+
+$ErrorActionPreference = "Stop"
+
+function New-Connection {
+    $connectionString = "Data Source=$ServerInstance;Initial Catalog=$Database;Integrated Security=SSPI;Connect Timeout=15"
+    $connection = New-Object System.Data.SqlClient.SqlConnection $connectionString
+    $connection.Open()
+    return $connection
+}
+
+function Invoke-Table {
+    param(
+        [System.Data.SqlClient.SqlConnection]$Connection,
+        [string]$Sql
+    )
+    $command = $Connection.CreateCommand()
+    $command.CommandText = $Sql
+    $command.CommandTimeout = 120
+    $adapter = New-Object System.Data.SqlClient.SqlDataAdapter $command
+    $table = New-Object System.Data.DataTable
+    [void]$adapter.Fill($table)
+    return $table
+}
+
+function Convert-DataTableRows {
+    param([System.Data.DataTable]$Table)
+    $rows = @()
+    foreach ($row in $Table.Rows) {
+        $item = [ordered]@{}
+        foreach ($column in $Table.Columns) {
+            $value = $row[$column.ColumnName]
+            if ($value -is [DBNull]) {
+                $value = $null
+            }
+            $item[$column.ColumnName] = $value
+        }
+        $rows += [pscustomobject]$item
+    }
+    return $rows
+}
+
+function Normalize-Key {
+    param([string]$Value)
+    if (-not $Value) {
+        return ""
+    }
+    return ($Value.ToLowerInvariant() -replace "[^a-z0-9]", "")
+}
+
+function Find-Value {
+    param(
+        [object]$Row,
+        [string[]]$Patterns
+    )
+    $properties = $Row.PSObject.Properties
+    foreach ($pattern in $Patterns) {
+        foreach ($property in $properties) {
+            $key = Normalize-Key $property.Name
+            if ($key -match $pattern) {
+                $value = $property.Value
+                if ($null -ne $value -and "$value".Trim() -ne "") {
+                    return "$value".Trim()
+                }
+            }
+        }
+    }
+    return ""
+}
+
+function Convert-ToIsoDate {
+    param([object]$Value)
+    if ($null -eq $Value -or "$Value".Trim() -eq "") {
+        return $null
+    }
+    try {
+        return ([datetime]$Value).ToString("yyyy-MM-dd")
+    } catch {
+        return $null
+    }
+}
+
+function Convert-ToBridgeRecord {
+    param(
+        [object]$Row,
+        [string]$SourceName
+    )
+    $name = Find-Value $Row @("^(client|assessee|party|customer)?name$", "fullname", "displayname", "tradename", "legalname")
+    $pan = Find-Value $Row @("pan")
+    $gst = Find-Value $Row @("gstin", "gstno", "gstnumber")
+    $mobile = Find-Value $Row @("mobile", "mobileno", "cell", "phone", "phoneno", "contactno", "tel")
+    $whatsapp = Find-Value $Row @("whatsapp")
+    $email = Find-Value $Row @("email", "mail")
+    $address = Find-Value $Row @("address", "addr")
+    $constitution = Find-Value $Row @("constitution", "status", "clienttype", "assesseetype", "category")
+    $company = Find-Value $Row @("company", "firm", "business")
+    $code = Find-Value $Row @("^(client|assessee|party)?(id|code|no)$", "code$")
+    $birthDate = Find-Value $Row @("dob", "birth", "dateofbirth", "incorporation", "doi")
+
+    if (-not $name -and $company) {
+        $name = $company
+    }
+    if (-not $code) {
+        $code = if ($pan) { $pan } elseif ($gst) { $gst } elseif ($name) { $name } else { [guid]::NewGuid().ToString() }
+    }
+
+    return [ordered]@{
+        source_id = $code
+        source_name = $SourceName
+        name = $name
+        constitution = $constitution
+        pan_no = $pan
+        gst_no = $gst
+        phone = $mobile
+        whatsapp = if ($whatsapp) { $whatsapp } else { $mobile }
+        email = $email
+        address = $address
+        company = $company
+        work_scope = ""
+        birth_date = Convert-ToIsoDate $birthDate
+        notes = ""
+    }
+}
+
+function Get-CandidateTables {
+    param([System.Data.SqlClient.SqlConnection]$Connection)
+    $sql = @"
+SELECT
+    TABLE_SCHEMA,
+    TABLE_NAME,
+    COLUMN_NAME,
+    DATA_TYPE
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE
+    LOWER(COLUMN_NAME) LIKE '%client%'
+    OR LOWER(COLUMN_NAME) LIKE '%assessee%'
+    OR LOWER(COLUMN_NAME) LIKE '%party%'
+    OR LOWER(COLUMN_NAME) LIKE '%name%'
+    OR LOWER(COLUMN_NAME) LIKE '%pan%'
+    OR LOWER(COLUMN_NAME) LIKE '%gst%'
+    OR LOWER(COLUMN_NAME) LIKE '%mobile%'
+    OR LOWER(COLUMN_NAME) LIKE '%phone%'
+    OR LOWER(COLUMN_NAME) LIKE '%email%'
+    OR LOWER(COLUMN_NAME) LIKE '%birth%'
+    OR LOWER(COLUMN_NAME) LIKE '%address%'
+ORDER BY TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME
+"@
+    $rows = Convert-DataTableRows (Invoke-Table $Connection $sql)
+    $groups = $rows | Group-Object TABLE_SCHEMA, TABLE_NAME
+    $candidates = @()
+    foreach ($group in $groups) {
+        $parts = $group.Name -split ", "
+        $columns = @($group.Group | ForEach-Object { $_.COLUMN_NAME })
+        $normalized = ($columns | ForEach-Object { Normalize-Key $_ }) -join " "
+        $score = 0
+        foreach ($word in @("name", "client", "assessee", "pan", "gst", "mobile", "phone", "email", "address", "birth")) {
+            if ($normalized -match $word) {
+                $score += 1
+            }
+        }
+        $candidates += [pscustomobject]@{
+            schema = $parts[0]
+            table = $parts[1]
+            score = $score
+            columns = ($columns -join ", ")
+        }
+    }
+    return $candidates | Sort-Object -Property @{Expression = "score"; Descending = $true}, schema, table
+}
+
+function Export-Records {
+    param(
+        [System.Data.SqlClient.SqlConnection]$Connection,
+        [string]$Sql,
+        [string]$SourceName
+    )
+    $rows = Convert-DataTableRows (Invoke-Table $Connection $Sql)
+    $records = @()
+    foreach ($row in $rows) {
+        $record = Convert-ToBridgeRecord $row $SourceName
+        if ($record.name -or $record.pan_no -or $record.gst_no -or $record.phone -or $record.email) {
+            $records += [pscustomobject]$record
+        }
+    }
+    return $records
+}
+
+function Push-ToGpa {
+    param(
+        [object[]]$Records,
+        [string]$Url,
+        [string]$Username,
+        [string]$Password
+    )
+    if (-not $Url -or -not $Username -or -not $Password) {
+        throw "GpaUrl, GpaUsername, and GpaPassword are required for Push mode."
+    }
+    $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $loginBody = @{ username = $Username; password = $Password } | ConvertTo-Json
+    Invoke-RestMethod -Uri "$Url/api/auth/login" -Method Post -ContentType "application/json" -Body $loginBody -WebSession $session | Out-Null
+    $previewBody = @{ records = $Records } | ConvertTo-Json -Depth 8
+    return Invoke-RestMethod -Uri "$Url/api/external-client-data/preview" -Method Post -ContentType "application/json" -Body $previewBody -WebSession $session
+}
+
+$connection = New-Connection
+try {
+    if ($Mode -eq "Discover") {
+        Get-CandidateTables $connection | Select-Object -First 80 | ConvertTo-Json -Depth 4
+        return
+    }
+
+    if ($Mode -eq "AutoExport" -or $Mode -eq "Push") {
+        $candidate = Get-CandidateTables $connection | Where-Object { $_.score -ge 4 } | Select-Object -First 1
+        if (-not $candidate) {
+            throw "No strong Computax client table candidate found. Run Discover and share the output."
+        }
+        $sql = "SELECT TOP $Limit * FROM [$($candidate.schema)].[$($candidate.table)]"
+        $records = Export-Records $connection $sql "Computax:$($candidate.schema).$($candidate.table)"
+    } else {
+        if (-not $QueryFile) {
+            throw "QueryFile is required for Export mode."
+        }
+        $sql = Get-Content -LiteralPath $QueryFile -Raw
+        $records = Export-Records $connection $sql "Computax:$QueryFile"
+    }
+
+    if ($Mode -eq "Push") {
+        Push-ToGpa $records $GpaUrl $GpaUsername $GpaPassword | ConvertTo-Json -Depth 8
+        return
+    }
+
+    $records | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+    [pscustomobject]@{
+        success = $true
+        records = $records.Count
+        output = (Resolve-Path $OutputPath).Path
+    } | ConvertTo-Json
+} finally {
+    $connection.Close()
+}
