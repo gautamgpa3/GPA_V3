@@ -735,6 +735,7 @@ function syncClientContactFields() {
     els.clientFields.phone.value = phoneDigits(contact.phone || contact.whatsapp || "");
     els.clientFields.whatsapp.value = phoneDigits(contact.whatsapp || contact.phone || "");
     els.clientFields.email.value = emailValue(contact.email || "");
+    els.clientFields.address.value = contact.address || "";
     if (contactPan) els.clientFields.pan_no.value = panNumber(contact.pan_no || "");
     if (personalBirthDate) els.clientFields.birth_date.value = isoToDisplayDate(contact.birth_date);
     else if (els.clientFields.birth_date.value === isoToDisplayDate(contact.birth_date)) els.clientFields.birth_date.value = "";
@@ -744,6 +745,7 @@ function syncClientContactFields() {
   setClientFieldReadonly(els.clientFields.phone, Boolean(contact), "Mobile / SMS");
   setClientFieldReadonly(els.clientFields.whatsapp, Boolean(contact), "WhatsApp");
   setClientFieldReadonly(els.clientFields.email, Boolean(contact), "Email");
+  setClientFieldReadonly(els.clientFields.address, Boolean(contact), "Address");
   setClientFieldReadonly(els.clientFields.birth_date, Boolean(contact && personalBirthDate), "Birth date");
 }
 
