@@ -19,7 +19,7 @@ from backend.models.master_data import Category, Constitution, Owner, Priority, 
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
-from backend.services.google_contacts import audit_google_contacts, push_gpa_contacts_to_google, restore_google_contacts_by_query, sync_google_contacts, sync_single_google_contact
+from backend.services.google_contacts import audit_google_contacts, push_gpa_contacts_to_google, restore_google_contacts_by_query, sync_google_contacts, sync_google_contacts_two_way, sync_single_google_contact
 from backend.services.icloud_contacts import sync_icloud_contacts
 from backend.services.whatsapp_business import send_whatsapp_text, whatsapp_settings
 
@@ -1940,16 +1940,17 @@ def set_google_sync_job(job_id: str, **values):
         job.update(values)
 
 
-def run_google_sync_job(job_id: str):
-    set_google_sync_job(job_id, status="running", started_at=now().isoformat(), message="Google contact sync is running.")
+def run_google_sync_job(job_id: str, sync_mode: str = "pull"):
+    sync_label = "Two-way Google contact sync" if sync_mode == "two_way" else "Google contact sync"
+    set_google_sync_job(job_id, status="running", started_at=now().isoformat(), mode=sync_mode, message=f"{sync_label} is running.")
     try:
         with Session(engine) as session:
-            result = sync_google_contacts(session)
+            result = sync_google_contacts_two_way(session) if sync_mode == "two_way" else sync_google_contacts(session)
         set_google_sync_job(
             job_id,
             status="completed",
             completed_at=now().isoformat(),
-            message="Google contact sync completed.",
+            message=f"{sync_label} completed.",
             result=result,
         )
     except Exception as error:  # noqa: BLE001
@@ -1962,8 +1963,7 @@ def run_google_sync_job(job_id: str):
         )
 
 
-@router.post("/contacts/sync/google/start")
-def start_google_contacts_sync():
+def start_google_contacts_sync_job(sync_mode: str):
     with GOOGLE_SYNC_LOCK:
         for existing_job_id, job in GOOGLE_SYNC_JOBS.items():
             if job.get("status") in {"queued", "running"}:
@@ -1974,10 +1974,21 @@ def start_google_contacts_sync():
                     "message": "Google contact sync is already running.",
                 }
     job_id = str(uuid4())
-    set_google_sync_job(job_id, status="queued", created_at=now().isoformat(), message="Google contact sync queued.")
-    worker = Thread(target=run_google_sync_job, args=(job_id,), daemon=True)
+    sync_label = "Two-way Google contact sync" if sync_mode == "two_way" else "Google contact sync"
+    set_google_sync_job(job_id, status="queued", mode=sync_mode, created_at=now().isoformat(), message=f"{sync_label} queued.")
+    worker = Thread(target=run_google_sync_job, args=(job_id, sync_mode), daemon=True)
     worker.start()
-    return {"success": True, "job_id": job_id, "status": "queued", "message": "Google contact sync started."}
+    return {"success": True, "job_id": job_id, "status": "queued", "mode": sync_mode, "message": f"{sync_label} started."}
+
+
+@router.post("/contacts/sync/google/start")
+def start_google_contacts_sync():
+    return start_google_contacts_sync_job("pull")
+
+
+@router.post("/contacts/sync/google/two-way/start")
+def start_two_way_google_contacts_sync():
+    return start_google_contacts_sync_job("two_way")
 
 
 @router.get("/contacts/sync/google/jobs/{job_id}")

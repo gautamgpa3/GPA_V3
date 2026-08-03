@@ -5,7 +5,7 @@ from os import getenv
 from pathlib import Path
 from re import sub
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +21,7 @@ TOKEN_URL = "https://oauth2.googleapis.com/token"
 PEOPLE_CONNECTIONS_URL = "https://people.googleapis.com/v1/people/me/connections"
 PEOPLE_CREATE_CONTACT_URL = "https://people.googleapis.com/v1/people:createContact"
 PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,biographies,birthdays,events,relations,urls,metadata"
+UPDATE_PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,biographies,birthdays,events,relations,urls"
 PERSONAL_BIRTHDATE_CONSTITUTIONS = {"Individual", "Proprietorship"}
 
 
@@ -462,6 +463,25 @@ def create_google_contact(access_token: str, contact: Contact) -> dict:
     return google_api_request("POST", url, access_token, build_google_person(contact))
 
 
+def google_update_fields(person: dict) -> str:
+    return ",".join(field for field in UPDATE_PERSON_FIELDS.split(",") if field in person)
+
+
+def update_google_contact(access_token: str, contact: Contact) -> dict:
+    if not contact.google_resource_name:
+        raise RuntimeError("Google contact ID is missing. Pull from Google first or create this contact in Google.")
+    if not contact.google_etag:
+        raise RuntimeError(f"Google etag is missing for {contact.name}. Pull from Google before updating it.")
+    person = build_google_person(contact)
+    update_fields = google_update_fields(person)
+    if not update_fields:
+        raise RuntimeError(f"{contact.name} has no syncable details for Google.")
+    person["etag"] = contact.google_etag
+    resource_name = quote(contact.google_resource_name, safe="/")
+    query = urlencode({"updatePersonFields": update_fields, "personFields": PERSON_FIELDS})
+    return google_api_request("PATCH", f"https://people.googleapis.com/v1/{resource_name}:updateContact?{query}", access_token, person)
+
+
 def sync_google_contacts(session: Session, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
     credentials = load_google_credentials(credentials_path)
     people = fetch_google_people(credentials)
@@ -645,10 +665,25 @@ def sync_single_google_contact(session: Session, contact_id: int, dry_run: bool 
 def push_gpa_contacts_to_google(session: Session, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
     credentials = load_google_credentials(credentials_path)
     contacts = session.exec(select(Contact).where(Contact.active == True).order_by(Contact.name)).all()  # noqa: E712
-    missing = [contact for contact in contacts if not contact.google_resource_name and (contact.phone or contact.whatsapp or contact.email)]
+    syncable = [contact for contact in contacts if contact.name and (contact.phone or contact.whatsapp or contact.email)]
+    missing = [contact for contact in syncable if not contact.google_resource_name]
+    existing = [contact for contact in syncable if contact.google_resource_name]
     created = 0
+    updated = 0
     skipped = 0
     access_token = "" if dry_run else google_token(credentials)
+    for contact in existing:
+        if dry_run:
+            updated += 1
+            continue
+        if not contact.google_etag:
+            skipped += 1
+            continue
+        result = update_google_contact(access_token, contact)
+        contact.google_etag = str(result.get("etag") or contact.google_etag or "").strip()
+        contact.updated_at = datetime.now()
+        session.add(contact)
+        updated += 1
     for contact in missing:
         if dry_run:
             created += 1
@@ -668,9 +703,24 @@ def push_gpa_contacts_to_google(session: Session, dry_run: bool = False, credent
             ActivityLog(
                 action="SYNCED",
                 entity_type="contact",
-                summary=f"Google contacts push: {created} created, {skipped} skipped",
-                details="Created missing Google Contacts from GPA contacts",
+                summary=f"Google contacts push: {created} created, {updated} updated, {skipped} skipped",
+                details="Created missing Google Contacts and updated linked Google Contacts from GPA contacts",
             )
         )
         session.commit()
-    return {"success": True, "created": created, "updated": 0, "skipped": skipped, "total": len(missing), "dry_run": dry_run}
+    return {"success": True, "created": created, "updated": updated, "skipped": skipped, "total": len(syncable), "dry_run": dry_run}
+
+
+def sync_google_contacts_two_way(session: Session, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
+    pull = sync_google_contacts(session, dry_run=dry_run, credentials_path=credentials_path)
+    push = push_gpa_contacts_to_google(session, dry_run=dry_run, credentials_path=credentials_path)
+    return {
+        "success": True,
+        "dry_run": dry_run,
+        "pull": pull,
+        "push": push,
+        "created": pull.get("created", 0) + push.get("created", 0),
+        "updated": pull.get("updated", 0) + push.get("updated", 0),
+        "skipped": pull.get("skipped", 0) + push.get("skipped", 0),
+        "message": "Two-way Google sync completed.",
+    }

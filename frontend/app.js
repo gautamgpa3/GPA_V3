@@ -1700,6 +1700,7 @@ function renderContacts() {
         <div class="inline-actions">
           <button class="secondary-button" data-action="sync-icloud-contacts">Sync iCloud</button>
           <button class="secondary-button" data-action="sync-google-contacts">Sync Google</button>
+          <button class="secondary-button" data-action="sync-google-two-way">2-way Google</button>
           <button class="secondary-button" data-action="audit-google-contacts">Audit Google</button>
           <button class="secondary-button" data-action="restore-google-contact">Restore Google</button>
           <button class="secondary-button" data-action="push-google-contacts">Push Google</button>
@@ -1715,7 +1716,7 @@ function renderContacts() {
         </label>
         <div class="task-meta">${contacts.length} of ${state.contacts.length} contact(s)</div>
       </div>
-      <div class="task-note">Sync imports iCloud or Google contacts into GPA. Push Google creates missing Google contacts from GPA; it does not delete phone contacts.</div>
+      <div class="task-note">Sync imports iCloud or Google contacts into GPA. Push Google creates or updates Google contacts from GPA. 2-way Google pulls Google first, then pushes GPA back to Google. Nothing is deleted.</div>
       <div class="contact-list">
         ${contacts
           .map((contact) => {
@@ -2018,13 +2019,30 @@ async function syncOneGoogleContact(contactId) {
 }
 
 async function pushGoogleContacts() {
-  if (!window.confirm("Create missing Google contacts from GPA contacts now? This will add contacts to Google but will not delete anything.")) return;
+  if (!window.confirm("Push GPA contacts to Google now? This will create missing Google contacts and update linked Google contacts, but will not delete anything.")) return;
   try {
     const result = await api(`${API_CONTACTS_URL}/push/google`, { method: "POST" });
     await loadContacts();
     await loadActivity();
     render();
-    window.alert(`Google push complete. Created in Google: ${result.created}, Skipped: ${result.skipped}`);
+    window.alert(`Google push complete. Created in Google: ${result.created}, Updated in Google: ${result.updated}, Skipped: ${result.skipped}`);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+async function syncGoogleContactsTwoWay() {
+  if (!window.confirm("Run 2-way Google sync now? GPA will first import Google changes, then create/update Google contacts from GPA. Nothing is deleted.")) return;
+  try {
+    const started = await api(`${API_CONTACTS_URL}/sync/google/two-way/start`, { method: "POST" });
+    window.alert("2-way Google sync started. GPA will keep checking until it finishes.");
+    const result = await waitForGoogleSync(started.job_id);
+    await loadContacts();
+    await loadActivity();
+    render();
+    const pull = result.pull || {};
+    const push = result.push || {};
+    window.alert(`2-way Google sync complete.\n\nPulled into GPA\nCreated: ${pull.created || 0}\nUpdated rows: ${pull.updated || 0}\nSkipped: ${pull.skipped || 0}\n\nPushed to Google\nCreated: ${push.created || 0}\nUpdated: ${push.updated || 0}\nSkipped: ${push.skipped || 0}`);
   } catch (error) {
     window.alert(error.message);
   }
@@ -3528,6 +3546,10 @@ function bindEvents() {
     }
     if (target.dataset.action === "sync-google-contacts") {
       syncGoogleContacts();
+      return;
+    }
+    if (target.dataset.action === "sync-google-two-way") {
+      syncGoogleContactsTwoWay();
       return;
     }
     if (target.dataset.action === "audit-google-contacts") {
