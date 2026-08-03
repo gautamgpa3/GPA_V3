@@ -308,7 +308,7 @@ function gstFilingMonth(text = "", fallbackISO = todayISO()) {
   const monthNames = Object.keys(GST_MONTH_LOOKUP).sort((a, b) => b.length - a.length).join("|");
   const match = String(text).toLowerCase().match(new RegExp(`\\b(?:for\\s+(?:month\\s+)?|of\\s+(?:month\\s+)?|period\\s+|month\\s+)(${monthNames})(?:\\s+|-)?(20\\d{2})?\\b`));
   if (match) {
-    const today = parseISODate(todayISO()) || new Date();
+    const today = toDate(todayISO()) || new Date();
     const periodMonth = GST_MONTH_LOOKUP[match[1]];
     let periodYear = match[2] ? Number(match[2]) : today.getFullYear();
     if (!match[2] && periodMonth > today.getMonth() + 1) periodYear -= 1;
