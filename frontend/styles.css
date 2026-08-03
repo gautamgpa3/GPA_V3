@@ -1232,6 +1232,13 @@ label textarea::placeholder {
   color: #858590;
 }
 
+.readonly-field {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  cursor: help;
+}
+
 select option {
   background: var(--control);
   color: var(--text);

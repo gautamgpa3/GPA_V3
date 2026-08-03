@@ -13,7 +13,6 @@ const API_AUTH_LOGIN_URL = "/api/auth/login";
 const API_AUTH_LOGOUT_URL = "/api/auth/logout";
 const SETTINGS_KEY = "gpa-v3-settings";
 const LOCAL_TIME_ZONE = "Asia/Kolkata";
-const ORGANIZATION_CONSTITUTIONS = new Set(["Partnership Firm", "LLP", "Company", "HUF", "AOP", "Trust", "Society"]);
 
 const state = {
   tasks: [],
@@ -35,6 +34,7 @@ const state = {
   dashboardExpanded: "",
   master: {
     categories: [],
+    constitutions: [],
     priorities: [],
     statuses: [],
     owners: [],
@@ -82,8 +82,10 @@ const els = {
   exportBtn: document.querySelector("#exportBtn"),
   logoutBtn: document.querySelector("#logoutBtn"),
   quickAddClientBtn: document.querySelector("#quickAddClientBtn"),
+  quickAddClientConstitutionBtn: document.querySelector("#quickAddClientConstitutionBtn"),
   quickAddClientCategoryBtn: document.querySelector("#quickAddClientCategoryBtn"),
   quickAddClientContactBtn: document.querySelector("#quickAddClientContactBtn"),
+  clientBirthDateLabel: document.querySelector("#clientBirthDateLabel"),
   quickAddPriorityBtn: document.querySelector("#quickAddPriorityBtn"),
   quickAddStatusBtn: document.querySelector("#quickAddStatusBtn"),
   quickAddRepeatBtn: document.querySelector("#quickAddRepeatBtn"),
@@ -698,6 +700,46 @@ function selectedTaskCategory() {
   return selectedClient()?.category || "Client";
 }
 
+function clientUsesPersonalBirthDate(constitution = "") {
+  return ["Individual", "Proprietorship"].includes(constitution || "Individual");
+}
+
+function selectedPrimaryContact() {
+  const id = els.clientFields.contact_id?.value;
+  if (!id) return null;
+  return state.contacts.find((contact) => Number(contact.id) === Number(id)) || null;
+}
+
+function readonlyContactFieldMessage(fieldLabel) {
+  return `${fieldLabel} is fetched from Primary contact. Please update it in Contacts; it will reflect here automatically.`;
+}
+
+function setClientFieldReadonly(field, readonly, label) {
+  field.readOnly = readonly;
+  field.classList.toggle("readonly-field", readonly);
+  field.title = readonly ? readonlyContactFieldMessage(label) : "";
+}
+
+function syncClientContactFields() {
+  const contact = selectedPrimaryContact();
+  const constitution = els.clientFields.constitution.value || "Individual";
+  const personalBirthDate = clientUsesPersonalBirthDate(constitution);
+  els.clientBirthDateLabel.textContent = personalBirthDate ? "Birth date" : "Date of incorporation";
+
+  if (contact) {
+    els.clientFields.phone.value = phoneDigits(contact.phone || contact.whatsapp || "");
+    els.clientFields.whatsapp.value = phoneDigits(contact.whatsapp || contact.phone || "");
+    els.clientFields.email.value = emailValue(contact.email || "");
+    if (personalBirthDate) els.clientFields.birth_date.value = isoToDisplayDate(contact.birth_date);
+    else if (els.clientFields.birth_date.value === isoToDisplayDate(contact.birth_date)) els.clientFields.birth_date.value = "";
+  }
+
+  setClientFieldReadonly(els.clientFields.phone, Boolean(contact), "Mobile / SMS");
+  setClientFieldReadonly(els.clientFields.whatsapp, Boolean(contact), "WhatsApp");
+  setClientFieldReadonly(els.clientFields.email, Boolean(contact), "Email");
+  setClientFieldReadonly(els.clientFields.birth_date, Boolean(contact && personalBirthDate), "Birth date");
+}
+
 function populateScheduleClients(selectedIds = []) {
   const selected = new Set(selectedIds.map(Number));
   els.scheduleFields.client_ids.innerHTML = sortedItems(state.clients)
@@ -713,10 +755,12 @@ function populateClientContacts(selectedId = "") {
 
 function populateMasterControls() {
   state.master.categories = sortedValues(state.master.categories);
+  state.master.constitutions = sortedValues(state.master.constitutions);
   state.master.priorities = sortedValues(state.master.priorities);
   state.master.statuses = sortedValues(state.master.statuses);
   state.master.repeat_types = sortedValues(state.master.repeat_types);
   state.master.owners = sortedValues(state.master.owners);
+  els.clientFields.constitution.innerHTML = optionTags(state.master.constitutions);
   els.fields.priority.innerHTML = optionTags(state.master.priorities);
   els.fields.status.innerHTML = optionTags(state.master.statuses);
   els.fields.repeat_type.innerHTML = optionTags(state.master.repeat_types);
@@ -1549,14 +1593,15 @@ function renderClients() {
             const blockers = clientBlockers(client.id);
             const taskNotes = clientTaskNotes(client.id);
             const contact = contactForClient(client);
+            const dateLabel = clientUsesPersonalBirthDate(client.constitution) ? "Birth date" : "Date of incorporation";
             return `
               <article class="client-card">
                 <div class="task-row">
                   <div>
                     <button class="task-title" data-action="edit-client" data-id="${client.id}">${escapeHtml(client.name)}</button>
                     <div class="task-meta">${escapeHtml(client.constitution || "Individual")} - ${escapeHtml(client.category || "Client")} - PAN: ${escapeHtml(client.pan_no || "Not set")} - GST: ${escapeHtml(client.gst_no || "Not set")}</div>
-                    <div class="task-meta">Contact: ${escapeHtml(contact?.name || "Not linked")}${client.contact_role ? ` (${escapeHtml(client.contact_role)})` : ""} - ${escapeHtml(contact?.phone || contact?.whatsapp || client.phone || "No phone")} - ${escapeHtml(client.email || contact?.email || "No email")}</div>
-                    ${client.birth_date ? `<div class="task-meta">Birth date: ${formatDate(client.birth_date)}</div>` : ""}
+                    <div class="task-meta">Contact: ${escapeHtml(contact?.name || "Not linked")}${client.contact_role ? ` (${escapeHtml(client.contact_role)})` : ""} - ${escapeHtml(contact?.phone || contact?.whatsapp || client.phone || "No phone")} - ${escapeHtml(contact?.email || client.email || "No email")}</div>
+                    ${client.birth_date ? `<div class="task-meta">${dateLabel}: ${formatDate(client.birth_date)}</div>` : ""}
                   </div>
                 </div>
                 <div class="task-note">${escapeHtml(client.work_scope || "No work scope recorded")}</div>
@@ -1979,6 +2024,7 @@ function masterList(title, type, items) {
 function masterTypeLabel(type) {
   return {
     categories: "category",
+    constitutions: "constitution",
     priorities: "priority",
     statuses: "status",
     owners: "assignee",
@@ -2194,6 +2240,7 @@ function renderSettings() {
   els.views.settings.innerHTML = `
     <div class="report-grid">
       ${masterList("Categories", "categories", state.master.category_items || [])}
+      ${masterList("Constitutions", "constitutions", state.master.constitution_items || [])}
       ${masterList("Priorities", "priorities", state.master.priority_items || [])}
       ${masterList("Statuses", "statuses", state.master.status_items || [])}
       ${masterList("Assigned to / staff", "owners", state.master.owner_items || [])}
@@ -2485,7 +2532,7 @@ function openClientDialog(client = null) {
   const defaults = {
     id: "",
     name: "",
-    constitution: "Individual",
+    constitution: state.master.constitutions.includes("Individual") ? "Individual" : state.master.constitutions[0] || "Individual",
     category: state.master.categories[0] || "Client",
     pan_no: "",
     contact_id: "",
@@ -2507,11 +2554,14 @@ function openClientDialog(client = null) {
     }
     field.value = data[key] ?? "";
   });
+  syncClientContactFields();
   els.clientDialog.showModal();
   markDialogClean(els.clientDialog, els.clientForm);
 }
 
 function readClientForm() {
+  syncClientContactFields();
+  const dateLabel = clientUsesPersonalBirthDate(els.clientFields.constitution.value) ? "Birth date" : "Date of incorporation";
   return {
     name: els.clientFields.name.value.trim(),
     constitution: els.clientFields.constitution.value || "Individual",
@@ -2525,7 +2575,7 @@ function readClientForm() {
     address: els.clientFields.address.value.trim(),
     gst_no: gstNumber(els.clientFields.gst_no.value),
     work_scope: els.clientFields.work_scope.value.trim(),
-    birth_date: displayDateToISO(els.clientFields.birth_date.value, "Birth date") || null,
+    birth_date: displayDateToISO(els.clientFields.birth_date.value, dateLabel) || null,
     active: true,
   };
 }
@@ -2545,7 +2595,7 @@ async function saveClientForm(event) {
     els.clientFields.phone.focus();
     return;
   }
-  if (ORGANIZATION_CONSTITUTIONS.has(payload.constitution) && !payload.contact_id) {
+  if (payload.constitution !== "Individual" && !payload.contact_id) {
     window.alert(`${payload.constitution} client must have a primary contact selected.`);
     els.clientFields.contact_id.focus();
     return;
@@ -2734,8 +2784,13 @@ async function saveMasterForm(event) {
     const taskField = taskFieldByMasterType[type];
     if (taskField) state.resumeTaskDraft[taskField] = savedItem.name;
   }
-  if (state.resumeClientAfterMasterType && state.resumeClientDraft && type === "categories" && savedItem?.name) {
-    state.resumeClientDraft.category = savedItem.name;
+  if (state.resumeClientAfterMasterType && state.resumeClientDraft && savedItem?.name) {
+    const clientFieldByMasterType = {
+      categories: "category",
+      constitutions: "constitution",
+    };
+    const clientField = clientFieldByMasterType[type];
+    if (clientField) state.resumeClientDraft[clientField] = savedItem.name;
   }
   await loadMasterData();
   await loadTasks();
@@ -3327,6 +3382,7 @@ function bindEvents() {
   );
   els.quickAddBtn.addEventListener("click", () => openTaskDialog());
   els.quickAddClientBtn.addEventListener("click", quickAddClientFromTask);
+  els.quickAddClientConstitutionBtn.addEventListener("click", () => quickAddMasterFromClient("constitutions"));
   els.quickAddClientCategoryBtn.addEventListener("click", () => quickAddMasterFromClient("categories"));
   els.quickAddClientContactBtn.addEventListener("click", quickAddContactFromClient);
   els.quickAddPriorityBtn.addEventListener("click", () => quickAddMasterFromTask("priorities"));
@@ -3350,8 +3406,20 @@ function bindEvents() {
   els.form.addEventListener("submit", saveForm);
   els.clientForm.addEventListener("submit", saveClientForm);
   els.contactForm.addEventListener("submit", saveContactForm);
+  els.clientFields.constitution.addEventListener("change", syncClientContactFields);
+  els.clientFields.contact_id.addEventListener("change", syncClientContactFields);
   [els.clientFields.phone, els.clientFields.whatsapp].forEach((field) => {
     field.addEventListener("input", () => normalizePhoneInput(field));
+  });
+  [
+    [els.clientFields.phone, "Mobile / SMS"],
+    [els.clientFields.whatsapp, "WhatsApp"],
+    [els.clientFields.email, "Email"],
+    [els.clientFields.birth_date, "Birth date"],
+  ].forEach(([field, label]) => {
+    field.addEventListener("focus", () => {
+      if (field.readOnly) window.alert(readonlyContactFieldMessage(label));
+    });
   });
   [els.contactFields.phone, els.contactFields.whatsapp].forEach((field) => {
     field.addEventListener("input", () => normalizePhoneInput(field));

@@ -46,3 +46,12 @@ class RepeatType(SQLModel, table=True):
     name: str = Field(index=True, unique=True)
     sort_order: int = 0
     active: bool = True
+
+
+class Constitution(SQLModel, table=True):
+    __tablename__ = "constitutions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True, unique=True)
+    sort_order: int = 0
+    active: bool = True

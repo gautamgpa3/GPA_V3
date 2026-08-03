@@ -7,7 +7,7 @@ from backend.core.config import DATABASE_URL
 from backend.models.activity import ActivityLog
 from backend.models.client import Client
 from backend.models.contact import Contact
-from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
+from backend.models.master_data import Category, Constitution, Owner, Priority, RepeatType, Status
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
@@ -24,6 +24,7 @@ SEED_DATA = {
     Status: ["Pending", "Going On", "Waiting", "Blocked", "Completed", "Delayed", "Cancelled"],
     Owner: ["Me"],
     RepeatType: ["None", "Daily", "Weekly", "Monthly", "Quarterly", "Yearly", "Custom Days"],
+    Constitution: ["Individual", "Proprietorship", "Partnership Firm", "LLP", "Company", "HUF", "AOP", "Trust", "Society"],
 }
 
 TASK_COLUMNS = {

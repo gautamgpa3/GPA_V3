@@ -15,7 +15,7 @@ from backend.database.engine import engine, get_session
 from backend.models.activity import ActivityLog
 from backend.models.client import Client
 from backend.models.contact import Contact
-from backend.models.master_data import Category, Owner, Priority, RepeatType, Status
+from backend.models.master_data import Category, Constitution, Owner, Priority, RepeatType, Status
 from backend.models.message_schedule import ClientMessageSchedule
 from backend.models.message_template import MessageTemplate
 from backend.models.task import Task
@@ -170,6 +170,7 @@ class MessageTemplateUpdate(BaseModel):
 
 MASTER_MODELS = {
     "categories": Category,
+    "constitutions": Constitution,
     "priorities": Priority,
     "statuses": Status,
     "owners": Owner,
@@ -179,6 +180,7 @@ MASTER_MODELS = {
 
 MASTER_USAGE = {
     "categories": [(Client, "category"), (Task, "category")],
+    "constitutions": [(Client, "constitution")],
     "priorities": [(Task, "priority")],
     "statuses": [(Task, "status")],
     "owners": [(Task, "owner")],
@@ -524,6 +526,14 @@ def ensure_unique_people_fields(session: Session, model, data: dict, label: str,
             raise HTTPException(status_code=400, detail=f"{field_label} already exists in {label.lower()}: {duplicate.name}")
 
 
+def ensure_unique_client_fields(session: Session, data: dict, exclude_id: int | None = None):
+    duplicate = find_duplicate_by_name(session, Client, data["name"], exclude_id=exclude_id, active_only=True)
+    if duplicate:
+        raise HTTPException(status_code=400, detail=f"Client name already exists: {duplicate.name}")
+    if data.get("contact_id") is None:
+        ensure_unique_people_fields(session, Client, data, "Client", exclude_id=exclude_id)
+
+
 def find_person_by_identity(session: Session, model, data: dict, active_only: bool = False):
     existing = find_duplicate_by_name(session, model, data.get("name", ""), active_only=active_only)
     if existing:
@@ -606,8 +616,7 @@ def normalize_gst_no(value: str) -> str:
     return gst_no
 
 
-CONSTITUTIONS_REQUIRING_CONTACT = {"Partnership Firm", "Company", "HUF", "AOP", "Trust", "LLP", "Society"}
-VALID_CONSTITUTIONS = {"Individual", "Proprietorship", *CONSTITUTIONS_REQUIRING_CONTACT}
+PERSONAL_BIRTHDATE_CONSTITUTIONS = {"Individual", "Proprietorship"}
 
 
 def normalize_pan_no(value: str, label: str = "PAN No.") -> str:
@@ -628,22 +637,29 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Ses
     if not data["name"]:
         raise HTTPException(status_code=400, detail="Client name is required")
     data["constitution"] = " ".join((data["constitution"] or "Individual").split())
-    if data["constitution"] not in VALID_CONSTITUTIONS:
-        raise HTTPException(status_code=400, detail=f"Invalid constitution: {data['constitution']}")
     data["category"] = data["category"] or "Client"
     data["contact_role"] = " ".join((data["contact_role"] or "").split())
+    ensure_master_value(session, Constitution, data["constitution"], "constitution")
     ensure_master_value(session, Category, data["category"], "category")
     linked_contact = session.get(Contact, data["contact_id"]) if data["contact_id"] is not None else None
     if data["contact_id"] is not None and (not linked_contact or not linked_contact.active):
         raise HTTPException(status_code=400, detail="Selected primary contact does not exist")
-    if data["constitution"] in CONSTITUTIONS_REQUIRING_CONTACT and not linked_contact:
+    if data["constitution"] != "Individual" and not linked_contact:
         raise HTTPException(status_code=400, detail=f"{data['constitution']} client must be linked with a primary contact")
-    data["phone"] = normalize_phone_number(data["phone"], "Mobile / SMS", required=data["constitution"] == "Individual")
-    data["whatsapp"] = normalize_phone_number(data["whatsapp"], "WhatsApp")
-    data["email"] = normalize_email(data["email"])
+    if linked_contact:
+        data["phone"] = linked_contact.phone or linked_contact.whatsapp or ""
+        data["whatsapp"] = linked_contact.whatsapp or linked_contact.phone or ""
+        data["email"] = linked_contact.email or ""
+        if data["constitution"] in PERSONAL_BIRTHDATE_CONSTITUTIONS:
+            data["birth_date"] = linked_contact.birth_date
+    else:
+        data["phone"] = normalize_phone_number(data["phone"], "Mobile / SMS", required=data["constitution"] == "Individual")
+        data["whatsapp"] = normalize_phone_number(data["whatsapp"], "WhatsApp")
+        data["email"] = normalize_email(data["email"])
     data["pan_no"] = normalize_pan_no(data["pan_no"], "Client PAN No.")
     data["gst_no"] = normalize_gst_no(data["gst_no"])
-    validate_date_range(data["birth_date"], "Birth date", 1900, 2100)
+    date_label = "Birth date" if data["constitution"] in PERSONAL_BIRTHDATE_CONSTITUTIONS else "Date of incorporation"
+    validate_date_range(data["birth_date"], date_label, 1900, 2100)
     return data
 
 
@@ -1522,11 +1538,13 @@ def client_context(session: Session, text: str) -> dict | None:
 def get_master_data(session: Session = Depends(get_session)):
     return {
         "categories": master_names(session, Category),
+        "constitutions": master_names(session, Constitution),
         "priorities": master_names(session, Priority),
         "statuses": master_names(session, Status),
         "owners": master_names(session, Owner),
         "repeat_types": master_names(session, RepeatType),
         "category_items": master_items(session, Category),
+        "constitution_items": master_items(session, Constitution),
         "priority_items": master_items(session, Priority),
         "status_items": master_items(session, Status),
         "owner_items": master_items(session, Owner),
@@ -1632,7 +1650,7 @@ def get_clients(include_inactive: bool = False, session: Session = Depends(get_s
 @router.post("/clients")
 def create_client(client_data: ClientCreate, session: Session = Depends(get_session)):
     data = normalize_client_data(client_data, session)
-    ensure_unique_people_fields(session, Client, data, "Client")
+    ensure_unique_client_fields(session, data)
     client = Client(**data, updated_at=now())
     session.add(client)
     session.flush()
@@ -1675,6 +1693,7 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
         contact.whatsapp = client.whatsapp
         contact.pan_no = client.pan_no
         contact.email = client.email
+        contact.birth_date = client.birth_date if client.constitution in PERSONAL_BIRTHDATE_CONSTITUTIONS else contact.birth_date
         contact.company = client.work_scope
         contact.address = client.address
         contact.notes = client.notes
@@ -1697,6 +1716,7 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
             whatsapp=client.whatsapp,
             pan_no=client.pan_no,
             email=client.email,
+            birth_date=client.birth_date if client.constitution in PERSONAL_BIRTHDATE_CONSTITUTIONS else None,
             company=client.work_scope,
             address=client.address,
             notes=client.notes,
@@ -1716,7 +1736,7 @@ def update_client(client_id: int, client_data: ClientUpdate, session: Session = 
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     data = normalize_client_data(client_data, session)
-    ensure_unique_people_fields(session, Client, data, "Client", exclude_id=client_id)
+    ensure_unique_client_fields(session, data, exclude_id=client_id)
     for field, value in data.items():
         setattr(client, field, value)
     client.updated_at = now()
@@ -2006,6 +2026,7 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         client.constitution = "Individual"
         client.contact_id = contact.id
         client.contact_role = "Self"
+        client.birth_date = contact.birth_date
         client.address = contact.address
         client.work_scope = contact.company
         client.notes = contact.notes
@@ -2025,6 +2046,7 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
             phone=contact.phone or contact.whatsapp,
             whatsapp=contact.whatsapp,
             email=contact.email,
+            birth_date=contact.birth_date,
             address=contact.address,
             work_scope=contact.company,
             notes=contact.notes,
@@ -2090,6 +2112,8 @@ def get_due_client_messages(session: Session = Depends(get_session)):
     active_clients = session.exec(select(Client).where(Client.active == True).order_by(Client.name)).all()  # noqa: E712
     due_messages = []
     for client in active_clients:
+        if client.constitution not in PERSONAL_BIRTHDATE_CONSTITUTIONS:
+            continue
         if not client.birth_date or client.birth_date.month != at_time.month or client.birth_date.day != at_time.day:
             continue
         phone = client_message_phone(session, client, "whatsapp")
