@@ -11,6 +11,7 @@ const API_BRIEFING_URL = "/api/briefing";
 const API_AUTH_STATUS_URL = "/api/auth/status";
 const API_AUTH_LOGIN_URL = "/api/auth/login";
 const API_AUTH_LOGOUT_URL = "/api/auth/logout";
+const API_EXTERNAL_CLIENT_DATA_URL = "/api/external-client-data";
 const SETTINGS_KEY = "gpa-v3-settings";
 const LOCAL_TIME_ZONE = "Asia/Kolkata";
 
@@ -49,6 +50,8 @@ const state = {
   },
   search: "",
   contactSearch: "",
+  externalImportText: "",
+  externalImportPreview: [],
 };
 
 const dialogSnapshots = new WeakMap();
@@ -2282,6 +2285,97 @@ function messageTemplateList() {
   `;
 }
 
+function externalSelectOptions(items = [], selectedId = "", emptyLabel = "Manual select") {
+  return `<option value="">${emptyLabel}</option>${sortedItems(items)
+    .map((item) => `<option value="${item.id}" ${String(item.id) === String(selectedId || "") ? "selected" : ""}>${escapeHtml(item.name)}</option>`)
+    .join("")}`;
+}
+
+function externalRecordLabel(record = {}) {
+  return [record.name, record.pan_no, record.gst_no, record.email, record.phone || record.whatsapp].filter(Boolean).join(" - ");
+}
+
+function externalImportPanel() {
+  const example = JSON.stringify(
+    [
+      {
+        source_id: "computax-001",
+        source_name: "Computax",
+        name: "Example Client",
+        pan_no: "AAAAA0000A",
+        gst_no: "",
+        phone: "9913363510",
+        email: "client@example.com",
+        address: "Client address",
+        birth_date: "1980-01-31",
+        work_scope: "Income Tax, GST",
+      },
+    ],
+    null,
+    2
+  );
+  const rows = state.externalImportPreview
+    .map((item, index) => {
+      const record = item.record || {};
+      return `
+        <article class="template-card external-match-card">
+          <div class="panel-head">
+            <h3>${escapeHtml(record.name || "Unnamed source record")}</h3>
+            <span class="mini">${item.needs_manual_review ? "Manual review" : "Suggested match"}</span>
+          </div>
+          <div class="task-meta">${escapeHtml(externalRecordLabel(record) || record.source_name || "External source")}</div>
+          <div class="form-grid compact-grid">
+            <label>
+              <span>GPA client</span>
+              <select data-external-client-index="${index}">
+                ${externalSelectOptions(state.clients, item.suggested_client_id, "No client")}
+              </select>
+            </label>
+            <label>
+              <span>GPA contact</span>
+              <select data-external-contact-index="${index}">
+                ${externalSelectOptions(state.contacts, item.suggested_contact_id, "No contact")}
+              </select>
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" data-external-create-client="${index}" ${item.suggested_client_id ? "" : "checked"} />
+              <span>Create client if not selected</span>
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" data-external-create-contact="${index}" ${item.suggested_contact_id ? "" : "checked"} />
+              <span>Create contact if not selected</span>
+            </label>
+          </div>
+          <div class="task-note">
+            Client: ${escapeHtml(item.suggested_client_name || "No confident match")} (${escapeHtml(item.client_reason)})
+            <br />
+            Contact: ${escapeHtml(item.suggested_contact_name || "No confident match")} (${escapeHtml(item.contact_reason)})
+            <br />
+            Missing in GPA: ${escapeHtml((item.missing_fields || []).join(", ") || "Nothing obvious")}
+          </div>
+        </article>
+      `;
+    })
+    .join("");
+  return `
+    <div class="panel">
+      <div class="panel-head">
+        <h3>External client data review</h3>
+        <span class="mini">Preview, manually match, then import</span>
+      </div>
+      <div class="task-note">Paste records from Computax Bridge or CSV conversion as JSON. GPA previews matches first and updates only GPA after confirmation.</div>
+      <textarea data-external-import-input rows="7" placeholder='${escapeHtml(example)}'>${escapeHtml(state.externalImportText)}</textarea>
+      <div class="dialog-actions">
+        <button class="secondary-button" data-action="preview-external-import" type="button">Preview matches</button>
+        <button class="primary-button" data-action="apply-external-import" type="button" ${state.externalImportPreview.length ? "" : "disabled"}>Apply selected matches</button>
+      </div>
+      <div class="template-list">
+        ${rows || `<div class="empty-state"><strong>No preview yet</strong><span>Paste external client records and preview matches.</span></div>`}
+      </div>
+    </div>
+  `;
+}
+
 function renderSettings() {
   els.views.settings.innerHTML = `
     <div class="report-grid">
@@ -2292,6 +2386,7 @@ function renderSettings() {
       ${masterList("Assigned to / staff", "owners", state.master.owner_items || [])}
       ${masterList("Repeat types", "repeat-types", state.master.repeat_type_items || [])}
     </div>
+    ${externalImportPanel()}
     ${messageTemplateList()}
   `;
 }
@@ -3216,6 +3311,80 @@ function exportContactsCSV() {
   downloadTextFile(`gpa-v3-contacts-${todayISO()}.csv`, [headers.map(csvCell).join(","), ...rows].join("\n"), "text/csv;charset=utf-8");
 }
 
+function readExternalImportRecords() {
+  const field = els.views.settings.querySelector("[data-external-import-input]");
+  state.externalImportText = field?.value || state.externalImportText || "";
+  if (!state.externalImportText.trim()) throw new Error("Paste external client records first.");
+  const parsed = JSON.parse(state.externalImportText);
+  if (!Array.isArray(parsed)) throw new Error("External data must be a JSON array of records.");
+  return parsed;
+}
+
+async function previewExternalImport() {
+  let records;
+  try {
+    records = readExternalImportRecords();
+  } catch (error) {
+    window.alert(error.message);
+    return;
+  }
+  try {
+    const result = await api(`${API_EXTERNAL_CLIENT_DATA_URL}/preview`, {
+      method: "POST",
+      body: JSON.stringify({ records }),
+    });
+    state.externalImportPreview = result.records || [];
+    renderSettings();
+    window.alert(`Preview ready.\nRecords: ${result.total}\nManual review needed: ${result.needs_manual_review}`);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
+function externalImportApplyItems() {
+  return state.externalImportPreview.map((item, index) => {
+    const clientField = els.views.settings.querySelector(`[data-external-client-index="${index}"]`);
+    const contactField = els.views.settings.querySelector(`[data-external-contact-index="${index}"]`);
+    const createClientField = els.views.settings.querySelector(`[data-external-create-client="${index}"]`);
+    const createContactField = els.views.settings.querySelector(`[data-external-create-contact="${index}"]`);
+    return {
+      record: item.record,
+      client_id: clientField?.value ? Number(clientField.value) : null,
+      contact_id: contactField?.value ? Number(contactField.value) : null,
+      create_client: Boolean(createClientField?.checked),
+      create_contact: Boolean(createContactField?.checked),
+    };
+  });
+}
+
+async function applyExternalImport() {
+  if (!state.externalImportPreview.length) {
+    window.alert("Preview records before applying.");
+    return;
+  }
+  const items = externalImportApplyItems();
+  const selected = items.filter((item) => item.client_id || item.contact_id || item.create_client || item.create_contact);
+  if (!selected.length) {
+    window.alert("Select at least one match or create option.");
+    return;
+  }
+  if (!window.confirm(`Apply ${selected.length} external match(es) to GPA? Existing GPA values will not be overwritten.`)) return;
+  try {
+    const result = await api(`${API_EXTERNAL_CLIENT_DATA_URL}/apply`, {
+      method: "POST",
+      body: JSON.stringify({ items: selected, overwrite_existing: false }),
+    });
+    await loadClients();
+    await loadContacts();
+    await loadActivity();
+    state.externalImportPreview = [];
+    render();
+    window.alert(`External import applied.\nUpdated: ${result.updated}\nUnchanged: ${result.unchanged}`);
+  } catch (error) {
+    window.alert(error.message);
+  }
+}
+
 function importContactsFromFile() {
   const input = document.createElement("input");
   input.type = "file";
@@ -3481,6 +3650,11 @@ function bindEvents() {
   els.deleteScheduleBtn.addEventListener("click", deleteScheduleFromDialog);
   els.deleteMasterBtn.addEventListener("click", deleteMasterFromDialog);
   document.body.addEventListener("input", (event) => {
+    const externalInput = event.target.closest("[data-external-import-input]");
+    if (externalInput) {
+      state.externalImportText = externalInput.value;
+      return;
+    }
     const target = event.target.closest("[data-action=\"contact-search\"]");
     if (!target) return;
     state.contactSearch = target.value;
@@ -3564,6 +3738,14 @@ function bindEvents() {
     }
     if (target.dataset.action === "contact-sync-google") {
       syncOneGoogleContact(target.dataset.id);
+      return;
+    }
+    if (target.dataset.action === "preview-external-import") {
+      previewExternalImport();
+      return;
+    }
+    if (target.dataset.action === "apply-external-import") {
+      applyExternalImport();
       return;
     }
     if (target.dataset.action === "contact-whatsapp") {

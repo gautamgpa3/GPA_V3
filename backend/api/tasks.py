@@ -142,6 +142,40 @@ class ContactImport(BaseModel):
     contacts: list[ContactCreate]
 
 
+class ExternalClientRecord(BaseModel):
+    source_id: str = ""
+    source_name: str = "External"
+    name: str = Field(default="", max_length=200)
+    constitution: str = ""
+    pan_no: str = ""
+    gst_no: str = ""
+    phone: str = ""
+    whatsapp: str = ""
+    email: str = ""
+    address: str = ""
+    company: str = ""
+    work_scope: str = ""
+    birth_date: date | None = None
+    notes: str = ""
+
+
+class ExternalClientPreviewRequest(BaseModel):
+    records: list[ExternalClientRecord]
+
+
+class ExternalClientApplyItem(BaseModel):
+    record: ExternalClientRecord
+    client_id: int | None = None
+    contact_id: int | None = None
+    create_client: bool = False
+    create_contact: bool = False
+
+
+class ExternalClientApplyRequest(BaseModel):
+    items: list[ExternalClientApplyItem]
+    overwrite_existing: bool = False
+
+
 class MessageScheduleBase(BaseModel):
     name: str = Field(min_length=1, max_length=160)
     message_type: str = "general"
@@ -734,6 +768,242 @@ def sync_linked_clients_from_contact(session: Session, contact: Contact) -> None
             client.birth_date = contact.birth_date
         client.updated_at = now()
         session.add(client)
+
+
+def safe_normalized_phone(value: str) -> str:
+    try:
+        return normalize_optional_phone_number(value, "Phone")
+    except HTTPException:
+        return ""
+
+
+def safe_normalized_email(value: str) -> str:
+    try:
+        return normalize_email(value)
+    except HTTPException:
+        return ""
+
+
+def safe_normalized_pan(value: str) -> str:
+    try:
+        return normalize_pan_no(value)
+    except HTTPException:
+        return ""
+
+
+def safe_normalized_gst(value: str) -> str:
+    try:
+        return normalize_gst_no(value)
+    except HTTPException:
+        return ""
+
+
+def external_record_payload(record: ExternalClientRecord) -> dict:
+    name = " ".join((record.name or "").split())
+    return {
+        "source_id": (record.source_id or name).strip(),
+        "source_name": (record.source_name or "External").strip(),
+        "name": name,
+        "constitution": " ".join((record.constitution or "").split()),
+        "pan_no": safe_normalized_pan(record.pan_no),
+        "gst_no": safe_normalized_gst(record.gst_no),
+        "phone": safe_normalized_phone(record.phone),
+        "whatsapp": safe_normalized_phone(record.whatsapp),
+        "email": safe_normalized_email(record.email),
+        "address": (record.address or "").strip(),
+        "company": (record.company or "").strip(),
+        "work_scope": (record.work_scope or record.company or "").strip(),
+        "birth_date": record.birth_date,
+        "notes": (record.notes or "").strip(),
+    }
+
+
+def match_text(value: str | None) -> str:
+    return sub(r"[^a-z0-9]", "", (value or "").casefold())
+
+
+def client_match_score(client: Client, record: dict) -> tuple[int, list[str]]:
+    score = 0
+    reasons: list[str] = []
+    record_numbers = {value for value in (record["phone"], record["whatsapp"]) if value}
+    client_numbers = {safe_normalized_phone(value) for value in (client.phone, client.whatsapp) if value}
+    if record["pan_no"] and client.pan_no == record["pan_no"]:
+        score += 100
+        reasons.append("PAN")
+    if record["gst_no"] and client.gst_no == record["gst_no"]:
+        score += 95
+        reasons.append("GST")
+    if record["email"] and client.email and client.email.casefold() == record["email"].casefold():
+        score += 70
+        reasons.append("email")
+    if record_numbers and client_numbers.intersection(record_numbers):
+        score += 70
+        reasons.append("phone")
+    if record["name"] and match_text(client.name) == match_text(record["name"]):
+        score += 50
+        reasons.append("name")
+    return score, reasons
+
+
+def contact_match_score(contact: Contact, record: dict) -> tuple[int, list[str]]:
+    score = 0
+    reasons: list[str] = []
+    record_numbers = {value for value in (record["phone"], record["whatsapp"]) if value}
+    contact_numbers = {safe_normalized_phone(value) for value in (contact.phone, contact.whatsapp) if value}
+    if record["pan_no"] and contact.pan_no == record["pan_no"]:
+        score += 100
+        reasons.append("PAN")
+    if record["email"] and contact.email and contact.email.casefold() == record["email"].casefold():
+        score += 70
+        reasons.append("email")
+    if record_numbers and contact_numbers.intersection(record_numbers):
+        score += 70
+        reasons.append("phone")
+    if record["name"] and match_text(contact.name) == match_text(record["name"]):
+        score += 50
+        reasons.append("name")
+    return score, reasons
+
+
+def best_external_match(items, score_fn, record: dict):
+    scored = []
+    for item in items:
+        score, reasons = score_fn(item, record)
+        if score:
+            scored.append((score, reasons, item))
+    scored.sort(key=lambda value: (-value[0], value[2].name.casefold()))
+    return scored[0] if scored else (0, [], None)
+
+
+def missing_external_client_fields(client: Client | None, contact: Contact | None, record: dict) -> list[str]:
+    missing: list[str] = []
+    if client:
+        for field in ["pan_no", "gst_no", "email", "address", "work_scope", "birth_date"]:
+            if record.get(field) and not getattr(client, field):
+                missing.append(f"client.{field}")
+    if contact:
+        for field in ["pan_no", "email", "address", "company", "birth_date"]:
+            source_value = record.get("company") if field == "company" else record.get(field)
+            if source_value and not getattr(contact, field):
+                missing.append(f"contact.{field}")
+    return missing
+
+
+def external_match_preview(session: Session, record: ExternalClientRecord) -> dict:
+    payload = external_record_payload(record)
+    clients = session.exec(select(Client).where(Client.active == True)).all()  # noqa: E712
+    contacts = session.exec(select(Contact).where(Contact.active == True)).all()  # noqa: E712
+    client_score, client_reasons, client = best_external_match(clients, client_match_score, payload)
+    contact_score, contact_reasons, contact = best_external_match(contacts, contact_match_score, payload)
+    return {
+        "record": {**payload, "birth_date": payload["birth_date"].isoformat() if payload["birth_date"] else None},
+        "suggested_client_id": client.id if client else None,
+        "suggested_client_name": client.name if client else "",
+        "client_score": client_score,
+        "client_reason": ", ".join(client_reasons) if client_reasons else "Manual selection required",
+        "suggested_contact_id": contact.id if contact else None,
+        "suggested_contact_name": contact.name if contact else "",
+        "contact_score": contact_score,
+        "contact_reason": ", ".join(contact_reasons) if contact_reasons else "Manual selection required",
+        "missing_fields": missing_external_client_fields(client, contact, payload),
+        "needs_manual_review": client_score < 50 or contact_score < 50,
+    }
+
+
+def set_if_allowed(target, field: str, value, overwrite_existing: bool, changes: list[str], prefix: str) -> None:
+    if value in {"", None}:
+        return
+    current = getattr(target, field)
+    if overwrite_existing or not current:
+        if current != value:
+            setattr(target, field, value)
+            changes.append(f"{prefix}.{field}")
+
+
+def apply_external_client_data(session: Session, item: ExternalClientApplyItem, overwrite_existing: bool) -> dict:
+    record = external_record_payload(item.record)
+    client = session.get(Client, item.client_id) if item.client_id else None
+    contact = session.get(Contact, item.contact_id) if item.contact_id else None
+    if item.client_id and (not client or not client.active):
+        raise HTTPException(status_code=400, detail=f"Selected client does not exist: {item.client_id}")
+    if item.contact_id and (not contact or not contact.active):
+        raise HTTPException(status_code=400, detail=f"Selected contact does not exist: {item.contact_id}")
+    if not client and item.create_client:
+        if not record["name"]:
+            raise HTTPException(status_code=400, detail="Source name is required to create a client")
+        client = find_duplicate_by_name(session, Client, record["name"], active_only=True)
+        if not client:
+            client = Client(
+                name=record["name"],
+                constitution=record["constitution"] or "Individual",
+                category="Client",
+                pan_no=record["pan_no"],
+                gst_no=record["gst_no"],
+                phone=record["phone"] or record["whatsapp"],
+                whatsapp=record["whatsapp"] or record["phone"],
+                email=record["email"],
+                address=record["address"],
+                work_scope=record["work_scope"],
+                birth_date=record["birth_date"],
+                notes=record["notes"],
+                active=True,
+                updated_at=now(),
+            )
+            session.add(client)
+            session.flush()
+    if not contact and item.create_contact:
+        if not record["name"]:
+            raise HTTPException(status_code=400, detail="Source name is required to create a contact")
+        contact = find_duplicate_by_name(session, Contact, record["name"], active_only=True)
+    if not contact and item.create_contact:
+        first_name, *rest = record["name"].split()
+        contact = Contact(
+            name=record["name"],
+            first_name=first_name,
+            last_name=" ".join(rest),
+            phone=record["phone"] or record["whatsapp"],
+            whatsapp=record["whatsapp"] or record["phone"],
+            pan_no=record["pan_no"],
+            email=record["email"],
+            company=record["company"] or record["work_scope"],
+            address=record["address"],
+            birth_date=record["birth_date"],
+            notes=record["notes"],
+            active=True,
+            updated_at=now(),
+        )
+        session.add(contact)
+        session.flush()
+    changes: list[str] = []
+    if client:
+        if contact and client.contact_id != contact.id:
+            client.contact_id = contact.id
+            client.contact_role = client.contact_role or "Primary contact"
+            changes.append("client.contact_id")
+        set_if_allowed(client, "pan_no", record["pan_no"], overwrite_existing, changes, "client")
+        set_if_allowed(client, "gst_no", record["gst_no"], overwrite_existing, changes, "client")
+        set_if_allowed(client, "email", record["email"], overwrite_existing, changes, "client")
+        set_if_allowed(client, "address", record["address"], overwrite_existing, changes, "client")
+        set_if_allowed(client, "work_scope", record["work_scope"], overwrite_existing, changes, "client")
+        set_if_allowed(client, "birth_date", record["birth_date"], overwrite_existing, changes, "client")
+        client.updated_at = now()
+        session.add(client)
+    if contact:
+        set_if_allowed(contact, "pan_no", record["pan_no"], overwrite_existing, changes, "contact")
+        set_if_allowed(contact, "email", record["email"], overwrite_existing, changes, "contact")
+        set_if_allowed(contact, "address", record["address"], overwrite_existing, changes, "contact")
+        set_if_allowed(contact, "company", record["company"] or record["work_scope"], overwrite_existing, changes, "contact")
+        set_if_allowed(contact, "birth_date", record["birth_date"], overwrite_existing, changes, "contact")
+        contact.updated_at = now()
+        session.add(contact)
+        sync_linked_clients_from_contact(session, contact)
+    return {
+        "source_id": record["source_id"],
+        "name": record["name"],
+        "client_id": client.id if client else None,
+        "contact_id": contact.id if contact else None,
+        "changes": changes,
+    }
 
 
 def normalize_schedule_data(schedule_data: MessageScheduleCreate | MessageScheduleUpdate, session: Session) -> dict:
@@ -1908,6 +2178,40 @@ def import_contacts(import_data: ContactImport, session: Session = Depends(get_s
     log_activity(session, "IMPORTED", "contact", f"Imported contacts: {created} created, {updated} updated, {skipped} skipped")
     session.commit()
     return {"success": True, "created": created, "updated": updated, "skipped": skipped}
+
+
+@router.post("/external-client-data/preview")
+def preview_external_client_data(import_data: ExternalClientPreviewRequest, session: Session = Depends(get_session)):
+    records = [external_match_preview(session, record) for record in import_data.records]
+    return {
+        "success": True,
+        "total": len(records),
+        "needs_manual_review": sum(1 for record in records if record["needs_manual_review"]),
+        "records": records,
+    }
+
+
+@router.post("/external-client-data/apply")
+def apply_external_client_data_import(import_data: ExternalClientApplyRequest, session: Session = Depends(get_session)):
+    results = []
+    for item in import_data.items:
+        results.append(apply_external_client_data(session, item, import_data.overwrite_existing))
+    changed = [result for result in results if result["changes"]]
+    log_activity(
+        session,
+        "IMPORTED",
+        "external-client-data",
+        f"External client data import: {len(changed)} updated, {len(results) - len(changed)} unchanged",
+        details=str(results[:20]),
+    )
+    session.commit()
+    return {
+        "success": True,
+        "total": len(results),
+        "updated": len(changed),
+        "unchanged": len(results) - len(changed),
+        "results": results,
+    }
 
 
 @router.post("/contacts/sync/icloud")
