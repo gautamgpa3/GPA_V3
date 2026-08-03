@@ -1699,11 +1699,9 @@ function renderContacts() {
         <h3>Contacts / telephone diary</h3>
         <div class="inline-actions">
           <button class="secondary-button" data-action="sync-icloud-contacts">Sync iCloud</button>
-          <button class="secondary-button" data-action="sync-google-contacts">Sync Google</button>
           <button class="secondary-button" data-action="sync-google-two-way">2-way Google</button>
           <button class="secondary-button" data-action="audit-google-contacts">Audit Google</button>
           <button class="secondary-button" data-action="restore-google-contact">Restore Google</button>
-          <button class="secondary-button" data-action="push-google-contacts">Push Google</button>
           <button class="secondary-button" data-action="import-contacts">Import</button>
           <button class="secondary-button" data-action="export-contacts">Export</button>
           <button class="primary-button" data-action="add-contact">Add contact</button>
@@ -1716,7 +1714,7 @@ function renderContacts() {
         </label>
         <div class="task-meta">${contacts.length} of ${state.contacts.length} contact(s)</div>
       </div>
-      <div class="task-note">Sync imports iCloud or Google contacts into GPA. Push Google creates or updates Google contacts from GPA. 2-way Google pulls Google first, then pushes GPA back to Google. Nothing is deleted.</div>
+      <div class="task-note">2-way Google pulls Google changes into GPA, then creates or updates Google contacts from GPA. Nothing is deleted.</div>
       <div class="contact-list">
         ${contacts
           .map((contact) => {

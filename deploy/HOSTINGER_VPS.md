@@ -258,14 +258,17 @@ Contacts -> Sync iCloud
 
 ## 13. Enable Google contacts sync
 
-Google sync has two parts:
+Google sync has three modes:
 
 ```text
-Google Contacts -> GPA V3 Contacts
-GPA V3 Contacts -> Google Contacts only when you click Push Google
+Sync Google: Google Contacts -> GPA V3 Contacts
+Push Google: GPA V3 Contacts -> Google Contacts
+2-way Google: Google Contacts -> GPA, then GPA -> Google
 ```
 
-On your iPhone, add the same Google account under Contacts. Then contacts created in Google will appear on your phone through Google contact sync.
+The normal recommended mode is 2-way Google. It does not delete contacts from Google or GPA.
+
+On your iPhone, add the same Google account under Contacts. Then contacts created or updated in Google will appear on your phone through Google contact sync.
 
 Create a Google Cloud OAuth client, enable the Google People API, and generate a refresh token with this scope:
 
@@ -317,7 +320,21 @@ cd /opt/gpa-v3/app
 GPA_GOOGLE_CONTACTS_FILE=/opt/gpa-v3/secrets/google_contacts.env /opt/gpa-v3/venv/bin/python -m backend.jobs.google_contacts_sync --push --dry-run
 ```
 
-Install automatic Google to GPA sync every 30 minutes:
+Test 2-way sync without saving:
+
+```bash
+cd /opt/gpa-v3/app
+GPA_GOOGLE_CONTACTS_FILE=/opt/gpa-v3/secrets/google_contacts.env /opt/gpa-v3/venv/bin/python -m backend.jobs.google_contacts_sync --two-way --dry-run
+```
+
+Run one real 2-way sync:
+
+```bash
+cd /opt/gpa-v3/app
+GPA_GOOGLE_CONTACTS_FILE=/opt/gpa-v3/secrets/google_contacts.env /opt/gpa-v3/venv/bin/python -m backend.jobs.google_contacts_sync --two-way
+```
+
+Install automatic 2-way Google sync every 30 minutes:
 
 ```bash
 cp /opt/gpa-v3/app/deploy/gpa-v3-google-contacts-sync.service /etc/systemd/system/gpa-v3-google-contacts-sync.service
@@ -330,8 +347,7 @@ systemctl list-timers gpa-v3-google-contacts-sync.timer
 Manual sync is also available in GPA:
 
 ```text
-Contacts -> Sync Google
-Contacts -> Push Google
+Contacts -> 2-way Google
 ```
 
 ## Update later
