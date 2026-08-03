@@ -715,7 +715,7 @@ function selectedPrimaryContact() {
 }
 
 function readonlyContactFieldMessage(fieldLabel) {
-  return `${fieldLabel} is fetched from Primary contact. Please update it in Contacts; it will reflect here automatically.`;
+  return `${fieldLabel} comes from the selected primary contact.`;
 }
 
 function setClientFieldReadonly(field, readonly, label) {
@@ -3417,17 +3417,6 @@ function bindEvents() {
   els.clientFields.contact_id.addEventListener("change", syncClientContactFields);
   [els.clientFields.phone, els.clientFields.whatsapp].forEach((field) => {
     field.addEventListener("input", () => normalizePhoneInput(field));
-  });
-  [
-    [els.clientFields.pan_no, "PAN No."],
-    [els.clientFields.phone, "Mobile / SMS"],
-    [els.clientFields.whatsapp, "WhatsApp"],
-    [els.clientFields.email, "Email"],
-    [els.clientFields.birth_date, "Birth date"],
-  ].forEach(([field, label]) => {
-    field.addEventListener("focus", () => {
-      if (field.readOnly) window.alert(readonlyContactFieldMessage(label));
-    });
   });
   [els.contactFields.phone, els.contactFields.whatsapp].forEach((field) => {
     field.addEventListener("input", () => normalizePhoneInput(field));
