@@ -650,6 +650,8 @@ def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Ses
         data["phone"] = linked_contact.phone or linked_contact.whatsapp or ""
         data["whatsapp"] = linked_contact.whatsapp or linked_contact.phone or ""
         data["email"] = linked_contact.email or ""
+        if data["constitution"] == "Proprietorship":
+            data["pan_no"] = linked_contact.pan_no or ""
         if data["constitution"] in PERSONAL_BIRTHDATE_CONSTITUTIONS:
             data["birth_date"] = linked_contact.birth_date
     else:

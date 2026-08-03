@@ -704,6 +704,10 @@ function clientUsesPersonalBirthDate(constitution = "") {
   return ["Individual", "Proprietorship"].includes(constitution || "Individual");
 }
 
+function clientUsesContactPan(constitution = "") {
+  return constitution === "Proprietorship";
+}
+
 function selectedPrimaryContact() {
   const id = els.clientFields.contact_id?.value;
   if (!id) return null;
@@ -724,16 +728,19 @@ function syncClientContactFields() {
   const contact = selectedPrimaryContact();
   const constitution = els.clientFields.constitution.value || "Individual";
   const personalBirthDate = clientUsesPersonalBirthDate(constitution);
+  const contactPan = clientUsesContactPan(constitution);
   els.clientBirthDateLabel.textContent = personalBirthDate ? "Birth date" : "Date of incorporation";
 
   if (contact) {
     els.clientFields.phone.value = phoneDigits(contact.phone || contact.whatsapp || "");
     els.clientFields.whatsapp.value = phoneDigits(contact.whatsapp || contact.phone || "");
     els.clientFields.email.value = emailValue(contact.email || "");
+    if (contactPan) els.clientFields.pan_no.value = panNumber(contact.pan_no || "");
     if (personalBirthDate) els.clientFields.birth_date.value = isoToDisplayDate(contact.birth_date);
     else if (els.clientFields.birth_date.value === isoToDisplayDate(contact.birth_date)) els.clientFields.birth_date.value = "";
   }
 
+  setClientFieldReadonly(els.clientFields.pan_no, Boolean(contact && contactPan), "PAN No.");
   setClientFieldReadonly(els.clientFields.phone, Boolean(contact), "Mobile / SMS");
   setClientFieldReadonly(els.clientFields.whatsapp, Boolean(contact), "WhatsApp");
   setClientFieldReadonly(els.clientFields.email, Boolean(contact), "Email");
@@ -3412,6 +3419,7 @@ function bindEvents() {
     field.addEventListener("input", () => normalizePhoneInput(field));
   });
   [
+    [els.clientFields.pan_no, "PAN No."],
     [els.clientFields.phone, "Mobile / SMS"],
     [els.clientFields.whatsapp, "WhatsApp"],
     [els.clientFields.email, "Email"],
