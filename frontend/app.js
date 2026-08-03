@@ -2421,6 +2421,9 @@ function openTaskDialog(task = null) {
     else if (key === "start_date" || key === "due_date") field.value = isoToDisplayDate(data[key]);
     else field.value = data[key] ?? "";
   });
+  if (!task && !els.fields.start_date.value) {
+    els.fields.start_date.value = isoToDisplayDate(todayISO());
+  }
   els.dialog.showModal();
   markDialogClean(els.dialog, els.form);
 }
