@@ -662,8 +662,29 @@ function normalizeGstInput(field) {
   field.value = gstNumber(field.value);
 }
 
+const GSTIN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+function gstinChecksum(base14 = "") {
+  let factor = 2;
+  let total = 0;
+  const modulus = GSTIN_ALPHABET.length;
+  for (let index = base14.length - 1; index >= 0; index -= 1) {
+    const codePoint = GSTIN_ALPHABET.indexOf(base14[index]);
+    if (codePoint < 0) return "";
+    const addend = factor * codePoint;
+    factor = factor === 2 ? 1 : 2;
+    total += Math.floor(addend / modulus) + (addend % modulus);
+  }
+  return GSTIN_ALPHABET[(modulus - (total % modulus)) % modulus];
+}
+
 function isValidGstNumber(value) {
-  return !value || /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(value);
+  const gst = gstNumber(value);
+  return !gst || (
+    /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(gst)
+    && isValidPanNumber(gst.slice(2, 12))
+    && gstinChecksum(gst.slice(0, 14)) === gst[14]
+  );
 }
 
 function panNumber(value = "") {

@@ -606,17 +606,8 @@ def normalize_email(value: str) -> str:
     return email
 
 
-def normalize_gst_no(value: str) -> str:
-    gst_no = sub(r"[^A-Za-z0-9]", "", value or "").upper()
-    if not gst_no:
-        return ""
-    pattern = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
-    if not fullmatch(pattern, gst_no):
-        raise HTTPException(status_code=400, detail="GST No. must be a valid 15-character GSTIN")
-    return gst_no
-
-
 PERSONAL_BIRTHDATE_CONSTITUTIONS = {"Individual", "Proprietorship"}
+GSTIN_ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 
 def normalize_pan_no(value: str, label: str = "PAN No.") -> str:
@@ -626,6 +617,31 @@ def normalize_pan_no(value: str, label: str = "PAN No.") -> str:
     if not fullmatch(r"^[A-Z]{5}[0-9]{4}[A-Z]$", pan_no):
         raise HTTPException(status_code=400, detail=f"{label} must be a valid 10-character PAN")
     return pan_no
+
+
+def gstin_checksum(base14: str) -> str:
+    factor = 2
+    total = 0
+    modulus = len(GSTIN_ALPHABET)
+    for char in reversed(base14):
+        code_point = GSTIN_ALPHABET.index(char)
+        addend = factor * code_point
+        factor = 1 if factor == 2 else 2
+        total += (addend // modulus) + (addend % modulus)
+    return GSTIN_ALPHABET[(modulus - (total % modulus)) % modulus]
+
+
+def normalize_gst_no(value: str) -> str:
+    gst_no = sub(r"[^A-Za-z0-9]", "", value or "").upper()
+    if not gst_no:
+        return ""
+    pattern = r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$"
+    if not fullmatch(pattern, gst_no):
+        raise HTTPException(status_code=400, detail="GST No. must be a valid 15-character GSTIN")
+    normalize_pan_no(gst_no[2:12], "GST No. PAN part")
+    if gstin_checksum(gst_no[:14]) != gst_no[14]:
+        raise HTTPException(status_code=400, detail="GST No. checksum is invalid")
+    return gst_no
 
 
 def normalize_client_data(client_data: ClientCreate | ClientUpdate, session: Session) -> dict:
@@ -1683,6 +1699,7 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
     client = session.get(Client, client_id)
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
+    client_pan_no = normalize_pan_no(client.pan_no, "Client PAN No.")
     if client.contact_id:
         contact = session.get(Contact, client.contact_id)
         if not contact:
@@ -1703,13 +1720,13 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
             "name": client.name,
             "phone": client.phone,
             "whatsapp": client.whatsapp,
-            "pan_no": client.pan_no,
+            "pan_no": client_pan_no,
             "email": client.email,
         }
         ensure_unique_people_fields(session, Contact, data, "Contact", exclude_id=contact.id)
         contact.phone = client.phone
         contact.whatsapp = client.whatsapp
-        contact.pan_no = client.pan_no
+        contact.pan_no = client_pan_no
         contact.email = client.email
         contact.birth_date = client.birth_date if client.constitution in PERSONAL_BIRTHDATE_CONSTITUTIONS else contact.birth_date
         contact.company = client.work_scope
@@ -1724,7 +1741,7 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
             "name": client.name,
             "phone": client.phone,
             "whatsapp": client.whatsapp,
-            "pan_no": client.pan_no,
+            "pan_no": client_pan_no,
             "email": client.email,
         }
         ensure_unique_people_fields(session, Contact, data, "Contact")
@@ -1732,7 +1749,7 @@ def make_contact_from_client(client_id: int, session: Session = Depends(get_sess
             name=client.name,
             phone=client.phone,
             whatsapp=client.whatsapp,
-            pan_no=client.pan_no,
+            pan_no=client_pan_no,
             email=client.email,
             birth_date=client.birth_date if client.constitution in PERSONAL_BIRTHDATE_CONSTITUTIONS else None,
             company=client.work_scope,
@@ -2030,11 +2047,12 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         raise HTTPException(status_code=404, detail="Contact not found")
     if not contact.phone and not contact.whatsapp:
         raise HTTPException(status_code=400, detail="Contact must have a phone or WhatsApp number before creating client")
+    contact_pan_no = normalize_pan_no(contact.pan_no, "Contact PAN No.")
     data = {
         "name": contact.name,
         "phone": contact.phone or contact.whatsapp,
         "whatsapp": contact.whatsapp,
-        "pan_no": contact.pan_no,
+        "pan_no": contact_pan_no,
         "email": contact.email,
     }
     client = find_person_by_identity(session, Client, data)
@@ -2043,7 +2061,7 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
         client.name = contact.name
         client.phone = contact.phone or contact.whatsapp
         client.whatsapp = contact.whatsapp
-        client.pan_no = contact.pan_no
+        client.pan_no = contact_pan_no
         client.email = contact.email
         client.constitution = "Individual"
         client.contact_id = contact.id
@@ -2062,7 +2080,7 @@ def make_client_from_contact(contact_id: int, session: Session = Depends(get_ses
             name=contact.name,
             constitution="Individual",
             category="Client",
-            pan_no=contact.pan_no,
+            pan_no=contact_pan_no,
             contact_id=contact.id,
             contact_role="Self",
             phone=contact.phone or contact.whatsapp,
