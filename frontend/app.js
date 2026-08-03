@@ -280,6 +280,55 @@ function formatDate(iso) {
   return isoToDisplayDate(iso) || "No date";
 }
 
+function gstReturnType(text = "") {
+  const compact = String(text).toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (compact.includes("gstr3b") || compact.includes("gst3b")) return "GSTR-3B";
+  if (compact.includes("gstr1") || compact.includes("gstrr1")) return "GSTR-1";
+  return "";
+}
+
+const GST_MONTH_LOOKUP = {
+  jan: 1, january: 1,
+  feb: 2, february: 2,
+  mar: 3, march: 3,
+  apr: 4, april: 4,
+  may: 5,
+  jun: 6, june: 6,
+  jul: 7, july: 7,
+  aug: 8, august: 8,
+  sep: 9, sept: 9, september: 9,
+  oct: 10, october: 10,
+  nov: 11, november: 11,
+  dec: 12, december: 12,
+};
+
+function gstFilingMonth(text = "", fallbackISO = todayISO()) {
+  const monthNames = Object.keys(GST_MONTH_LOOKUP).sort((a, b) => b.length - a.length).join("|");
+  const match = String(text).toLowerCase().match(new RegExp(`\\b(?:for\\s+(?:month\\s+)?|of\\s+(?:month\\s+)?|period\\s+|month\\s+)(${monthNames})(?:\\s+|-)?(20\\d{2})?\\b`));
+  if (match) {
+    const today = parseISODate(todayISO()) || new Date();
+    const periodMonth = GST_MONTH_LOOKUP[match[1]];
+    let periodYear = match[2] ? Number(match[2]) : today.getFullYear();
+    if (!match[2] && periodMonth > today.getMonth() + 1) periodYear -= 1;
+    const filing = new Date(periodYear, periodMonth, 1);
+    return `${filing.getFullYear()}-${String(filing.getMonth() + 1).padStart(2, "0")}`;
+  }
+  return String(fallbackISO || todayISO()).slice(0, 7);
+}
+
+function gstTaskDates(text = "", fallbackISO = todayISO()) {
+  const type = gstReturnType(text);
+  if (!type) return null;
+  const filingMonth = gstFilingMonth(text, fallbackISO);
+  const startDay = type === "GSTR-1" ? "01" : "13";
+  const dueDay = type === "GSTR-1" ? "11" : "20";
+  return {
+    title: type,
+    start_date: `${filingMonth}-${startDay}`,
+    due_date: `${filingMonth}-${dueDay}`,
+  };
+}
+
 function formatTimestamp(value) {
   if (!value) return "";
   const text = String(value);
@@ -2300,6 +2349,16 @@ function openTaskDialog(task = null) {
 }
 
 function readForm() {
+  const gstDates = gstTaskDates(
+    [els.fields.title.value, els.fields.topic.value, els.fields.description.value, els.fields.notes.value].join(" "),
+    displayDateToISO(els.fields.due_date.value, "Due / last date") || todayISO()
+  );
+  if (gstDates) {
+    els.fields.title.value = gstDates.title;
+    els.fields.start_date.value = isoToDisplayDate(gstDates.start_date);
+    els.fields.due_date.value = isoToDisplayDate(gstDates.due_date);
+    if (els.fields.repeat_type.value === "None") els.fields.repeat_type.value = "Monthly";
+  }
   const startDate = displayDateToISO(els.fields.start_date.value, "Start date", { required: true, minYear: 2000, maxYear: 2100 });
   const dueDate = displayDateToISO(els.fields.due_date.value, "Due / last date", { required: true, minYear: 2000, maxYear: 2100 });
   if (diffDays(dueDate, startDate) < 0) throw new Error("Due / last date cannot be before Start date.");

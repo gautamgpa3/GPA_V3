@@ -270,6 +270,52 @@ def add_months(value: date, months: int) -> date:
     return date(year, month, day)
 
 
+GST_RETURN_RULES = {
+    "GSTR-1": (1, 11),
+    "GSTR-3B": (13, 20),
+}
+
+
+def gst_return_type(text: str) -> str:
+    lower = (text or "").lower()
+    compact = sub(r"[^a-z0-9]", "", lower)
+    if "gstr3b" in compact or "gst3b" in compact:
+        return "GSTR-3B"
+    if "gstr1" in compact or "gstrr1" in compact or fullmatch(r".*\bgst\s*r\s*1\b.*", lower):
+        return "GSTR-1"
+    return ""
+
+
+def gst_period_from_text(text: str, today: date | None = None) -> date | None:
+    today = today or date.today()
+    month_pattern = "|".join(sorted(MONTH_LOOKUP, key=len, reverse=True))
+    match = search(rf"\b(?:for\s+(?:month\s+)?|of\s+(?:month\s+)?|period\s+|month\s+)({month_pattern})(?:\s+|\-)?(20\d{{2}})?\b", text.lower())
+    if not match:
+        return None
+    month = MONTH_LOOKUP.get(match.group(1))
+    if not month:
+        return None
+    year = int(match.group(2) or today.year)
+    if not match.group(2) and month > today.month:
+        year -= 1
+    return date(year, month, 1)
+
+
+def gst_filing_dates(return_type: str, filing_month: date) -> tuple[date, date]:
+    start_day, due_day = GST_RETURN_RULES[return_type]
+    return date(filing_month.year, filing_month.month, start_day), date(filing_month.year, filing_month.month, due_day)
+
+
+def gst_task_dates(text: str, fallback_due: date | None = None) -> tuple[str, date, date] | None:
+    return_type = gst_return_type(text)
+    if not return_type:
+        return None
+    period = gst_period_from_text(text)
+    filing_month = add_months(period, 1) if period else date((fallback_due or date.today()).year, (fallback_due or date.today()).month, 1)
+    start, due = gst_filing_dates(return_type, filing_month)
+    return return_type, start, due
+
+
 def next_date(value: date | None, repeat_type: str, repeat_every: int) -> date | None:
     if not value:
         return None
@@ -322,6 +368,16 @@ def normalize_task_data(task_data: TaskCreate | TaskUpdate, session: Session) ->
     data["notes"] = data["notes"].strip()
     if data["start_date"] is None:
         data["start_date"] = date.today()
+    gst_dates = gst_task_dates(" ".join([data["title"], data["topic"], data["description"], data["notes"]]), data["due_date"])
+    if gst_dates:
+        return_type, start_date, due_date = gst_dates
+        data["title"] = return_type
+        data["start_date"] = start_date
+        data["due_date"] = due_date
+        if data["repeat_type"] == "None":
+            data["repeat_type"] = "Monthly"
+        if data["repeat_type"] in {"Monthly", "Quarterly"}:
+            data["repeat_every"] = 1
     validate_date_range(data["start_date"], "Start date", 2000, 2100, required=True)
     validate_date_range(data["due_date"], "Due / last date", 2000, 2100, required=True)
     if data["due_date"] < data["start_date"]:
@@ -988,6 +1044,9 @@ def parse_assistant_date(text: str) -> date:
 
 def assistant_task_title(text: str) -> str:
     cleaned = text.strip()
+    return_type = gst_return_type(cleaned)
+    if return_type:
+        return return_type
     if any(term in cleaned.lower() for term in ITR_TERMS):
         if "group itr" in cleaned.lower():
             return "GROUP ITR"
@@ -1017,6 +1076,8 @@ def assistant_priority(text: str) -> str:
 
 def assistant_should_create_task(text: str) -> bool:
     lower = text.lower().strip()
+    if gst_return_type(lower):
+        return True
     starts = (
         "add",
         "call",
@@ -1058,6 +1119,9 @@ def assistant_task_time(text: str) -> str:
 
 
 def assistant_topic(text: str) -> str:
+    gst_period = gst_period_from_text(text)
+    if gst_period and gst_return_type(text):
+        return f"GST period {gst_period.strftime('%B %Y')}"
     ay_match = search(r"(?i)\bay\s*(20\d{2}\s*[-/]\s*\d{2})\b", text)
     if ay_match and any(term in text.lower() for term in ITR_TERMS):
         return f"AY {sub(r'\\s+', '', ay_match.group(1))}"
@@ -1085,23 +1149,36 @@ def assistant_details(text: str) -> str:
 
 
 def assistant_start_date(text: str, due: date) -> date:
+    gst_dates = gst_task_dates(text, due)
+    if gst_dates:
+        return gst_dates[1]
     if any(term in text.lower() for term in ITR_TERMS):
         return date(due.year, 6, 1)
     return due
 
 
 def assistant_repeat_type(text: str) -> str:
+    if gst_return_type(text):
+        return "Quarterly" if "quarter" in text.lower() else "Monthly"
     if any(term in text.lower() for term in ITR_TERMS):
         return "Yearly"
     return "None"
 
 
 def assistant_requested_client_name(text: str) -> str:
-    match = search(r"(?i)\b(?:of|for)\s+(.+)$", text)
+    match = search(r"(?i)\b(of|for)\s+(.+)$", text)
     if not match:
         return ""
-    name = match.group(1).strip()
+    name = match.group(2).strip()
+    first_word = name.split(maxsplit=1)[0].strip(" ,.-").lower()
+    if gst_return_type(text) and match.group(1).lower() == "for" and (first_word == "month" or first_word in MONTH_LOOKUP):
+        return ""
+    if gst_return_type(text):
+        month_pattern = "|".join(sorted(MONTH_LOOKUP, key=len, reverse=True))
+        name = sub(rf"(?i)\b(?:for\s+(?:month\s+)?|of\s+(?:month\s+)?|period\s+|month\s+)({month_pattern})(?:\s+|\-)?(20\d{{2}})?\b.*$", "", name).strip()
     for marker in (
+        " for month ",
+        " for period ",
         " for ay ",
         " ay ",
         " before ",
@@ -1116,6 +1193,8 @@ def assistant_requested_client_name(text: str) -> str:
         " details ",
         " note ",
         " notes ",
+        " monthly",
+        " quarterly",
         " high priority",
         " urgent",
         " normal priority",
@@ -2234,6 +2313,9 @@ def assistant_command(command: AssistantCommand, session: Session = Depends(get_
 
     if assistant_should_create_task(lower):
         due = parse_assistant_date(lower)
+        gst_dates = gst_task_dates(text, due)
+        if gst_dates:
+            due = gst_dates[2]
         title = assistant_task_title(text)
         client = assistant_client(session, text)
         requested_client = assistant_requested_client_name(text)
