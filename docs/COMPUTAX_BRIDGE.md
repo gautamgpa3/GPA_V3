@@ -23,6 +23,13 @@ Because `(local)` means local to the Computax server, this bridge should be run 
 
 Run from the GPA project folder on the Computax/server machine.
 
+For non-technical use, copy these files to the Computax server and double-click:
+
+- `computax_discover.bat`
+- `computax_export.bat`
+
+The export file will be created as `computax_clients.json` in the same folder.
+
 Discover possible client tables:
 
 ```powershell
