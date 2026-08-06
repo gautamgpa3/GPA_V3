@@ -53,6 +53,8 @@ const state = {
   externalImportText: "",
   externalImportFileName: "",
   externalImportPreview: [],
+  externalImportSearch: "",
+  externalImportSelected: new Set(),
 };
 
 const dialogSnapshots = new WeakMap();
@@ -2305,6 +2307,34 @@ function externalRecordLabel(record = {}) {
   return [record.name, record.pan_no, record.gst_no, record.email, record.phone || record.whatsapp].filter(Boolean).join(" - ");
 }
 
+function externalImportSearchText(item = {}) {
+  const record = item.record || {};
+  return [
+    record.name,
+    record.constitution,
+    record.pan_no,
+    record.gst_no,
+    record.phone,
+    record.whatsapp,
+    record.email,
+    record.address,
+    record.company,
+    record.work_scope,
+    item.suggested_client_name,
+    item.suggested_contact_name,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function externalImportFilteredEntries() {
+  const query = state.externalImportSearch.trim().toLowerCase();
+  return state.externalImportPreview
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !query || externalImportSearchText(item).includes(query));
+}
+
 function externalImportPanel() {
   const example = JSON.stringify(
     [
@@ -2324,15 +2354,23 @@ function externalImportPanel() {
     null,
     2
   );
-  const visiblePreview = state.externalImportPreview.slice(0, 60);
-  const hiddenPreviewCount = Math.max(state.externalImportPreview.length - visiblePreview.length, 0);
+  const filteredEntries = externalImportFilteredEntries();
+  const visiblePreview = filteredEntries.slice(0, 100);
+  const hiddenPreviewCount = Math.max(filteredEntries.length - visiblePreview.length, 0);
+  const selectedCount = state.externalImportSelected.size;
+  const emptyPreviewMessage = state.externalImportPreview.length
+    ? `<div class="empty-state"><strong>No Computax clients match this search</strong><span>Change the search text to see more records.</span></div>`
+    : `<div class="empty-state"><strong>No preview yet</strong><span>Choose the Computax JSON export or paste external records, then preview matches.</span></div>`;
   const rows = visiblePreview
-    .map((item, index) => {
+    .map(({ item, index }) => {
       const record = item.record || {};
       return `
         <article class="template-card external-match-card">
           <div class="panel-head">
-            <h3>${escapeHtml(record.name || "Unnamed source record")}</h3>
+            <label class="inline-check">
+              <input type="checkbox" data-external-select-index="${index}" ${state.externalImportSelected.has(index) ? "checked" : ""} />
+              <span>${escapeHtml(record.name || "Unnamed source record")}</span>
+            </label>
             <span class="mini">${item.needs_manual_review ? "Manual review" : "Suggested match"}</span>
           </div>
           <div class="task-meta">${escapeHtml(externalRecordLabel(record) || record.source_name || "External source")}</div>
@@ -2384,13 +2422,20 @@ function externalImportPanel() {
         <span class="mini">${escapeHtml(state.externalImportFileName || "No Computax file selected")}</span>
       </div>
       <textarea data-external-import-input rows="7" placeholder='${escapeHtml(example)}'>${escapeHtml(state.externalImportText)}</textarea>
+      <div class="search-wrap">
+        <span>Search</span>
+        <input data-action="external-import-search" type="search" value="${escapeHtml(state.externalImportSearch)}" placeholder="Client name, PAN, GST, phone, email..." />
+      </div>
       <div class="dialog-actions">
         <button class="secondary-button" data-action="preview-external-import" type="button">Preview matches</button>
-        <button class="primary-button" data-action="apply-external-import" type="button" ${state.externalImportPreview.length ? "" : "disabled"}>Apply all preview records</button>
+        <button class="secondary-button" data-action="select-visible-external-import" type="button" ${visiblePreview.length ? "" : "disabled"}>Select visible</button>
+        <button class="secondary-button" data-action="clear-external-import-selection" type="button" ${selectedCount ? "" : "disabled"}>Clear selection</button>
+        <button class="primary-button" data-action="apply-external-import" type="button" ${selectedCount ? "" : "disabled"}>Import selected</button>
+        <span class="mini">${selectedCount} selected / ${filteredEntries.length} shown / ${state.externalImportPreview.length} total</span>
       </div>
       <div class="template-list">
-        ${rows || `<div class="empty-state"><strong>No preview yet</strong><span>Choose the Computax JSON export or paste external records, then preview matches.</span></div>`}
-        ${hiddenPreviewCount ? `<div class="task-note">Showing first ${visiblePreview.length} of ${state.externalImportPreview.length} preview records. Apply all preview records will also create/import the hidden records when no GPA match is found.</div>` : ""}
+        ${rows || emptyPreviewMessage}
+        ${hiddenPreviewCount ? `<div class="task-note">Showing first ${visiblePreview.length} of ${filteredEntries.length} matching records. Search narrower or use Select visible in batches.</div>` : ""}
       </div>
     </div>
   `;
@@ -3351,6 +3396,8 @@ function loadComputaxFile(file) {
       state.externalImportText = text;
       state.externalImportFileName = `${file.name} (${parsed.length} record${parsed.length === 1 ? "" : "s"})`;
       state.externalImportPreview = [];
+      state.externalImportSelected = new Set();
+      state.externalImportSearch = "";
       renderSettings();
       window.alert(`Computax export loaded.\nRecords: ${parsed.length}\nNow click Preview matches.`);
     } catch (error) {
@@ -3375,15 +3422,17 @@ async function previewExternalImport() {
       body: JSON.stringify({ records }),
     });
     state.externalImportPreview = result.records || [];
+    state.externalImportSelected = new Set();
     renderSettings();
-    window.alert(`Preview ready.\nRecords: ${result.total}\nManual review needed: ${result.needs_manual_review}`);
+    window.alert(`Preview ready.\nRecords: ${result.total}\nManual review needed: ${result.needs_manual_review}\nSelect the clients you want to import.`);
   } catch (error) {
     window.alert(error.message);
   }
 }
 
 function externalImportApplyItems() {
-  return state.externalImportPreview.map((item, index) => {
+  return [...state.externalImportSelected].sort((a, b) => a - b).map((index) => {
+    const item = state.externalImportPreview[index];
     const clientField = els.views.settings.querySelector(`[data-external-client-index="${index}"]`);
     const contactField = els.views.settings.querySelector(`[data-external-contact-index="${index}"]`);
     const createClientField = els.views.settings.querySelector(`[data-external-create-client="${index}"]`);
@@ -3405,6 +3454,10 @@ async function applyExternalImport() {
     window.alert("Preview records before applying.");
     return;
   }
+  if (!state.externalImportSelected.size) {
+    window.alert("Select at least one Computax client to import.");
+    return;
+  }
   const items = externalImportApplyItems();
   const applicable = items.filter((item) => item.client_id || item.contact_id || item.create_client || item.create_contact);
   if (!applicable.length) {
@@ -3420,7 +3473,7 @@ async function applyExternalImport() {
     await loadClients();
     await loadContacts();
     await loadActivity();
-    state.externalImportPreview = [];
+    state.externalImportSelected = new Set();
     render();
     window.alert(`External import applied.\nCreated: ${result.created}\nUpdated: ${result.updated}\nUnchanged: ${result.unchanged}`);
   } catch (error) {
@@ -3698,6 +3751,18 @@ function bindEvents() {
       state.externalImportText = externalInput.value;
       return;
     }
+    const externalSearch = event.target.closest("[data-action=\"external-import-search\"]");
+    if (externalSearch) {
+      state.externalImportSearch = externalSearch.value;
+      const cursor = externalSearch.selectionStart ?? state.externalImportSearch.length;
+      renderSettings();
+      const nextInput = els.views.settings.querySelector("[data-action=\"external-import-search\"]");
+      if (nextInput) {
+        nextInput.focus();
+        nextInput.setSelectionRange(cursor, cursor);
+      }
+      return;
+    }
     const target = event.target.closest("[data-action=\"contact-search\"]");
     if (!target) return;
     state.contactSearch = target.value;
@@ -3713,6 +3778,17 @@ function bindEvents() {
     const computaxFileInput = event.target.closest("[data-computax-file-input]");
     if (computaxFileInput) {
       loadComputaxFile(computaxFileInput.files?.[0]);
+      return;
+    }
+    const externalSelect = event.target.closest("[data-external-select-index]");
+    if (externalSelect) {
+      const index = Number(externalSelect.dataset.externalSelectIndex);
+      if (externalSelect.checked) {
+        state.externalImportSelected.add(index);
+      } else {
+        state.externalImportSelected.delete(index);
+      }
+      renderSettings();
     }
   });
   document.body.addEventListener("click", (event) => {
@@ -3791,6 +3867,18 @@ function bindEvents() {
     }
     if (target.dataset.action === "preview-external-import") {
       previewExternalImport();
+      return;
+    }
+    if (target.dataset.action === "select-visible-external-import") {
+      externalImportFilteredEntries()
+        .slice(0, 100)
+        .forEach(({ index }) => state.externalImportSelected.add(index));
+      renderSettings();
+      return;
+    }
+    if (target.dataset.action === "clear-external-import-selection") {
+      state.externalImportSelected = new Set();
+      renderSettings();
       return;
     }
     if (target.dataset.action === "apply-external-import") {
