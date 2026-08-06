@@ -5,7 +5,7 @@ param(
     [string]$Database = "CompuOffice",
     [string]$QueryFile = "",
     [string]$OutputPath = ".\computax_clients.json",
-    [int]$Limit = 5000,
+    [int]$Limit = 15000,
     [string]$GpaUrl = "",
     [string]$GpaUsername = "",
     [string]$GpaPassword = ""
@@ -31,7 +31,7 @@ function Invoke-Table {
     $adapter = New-Object System.Data.SqlClient.SqlDataAdapter $command
     $table = New-Object System.Data.DataTable
     [void]$adapter.Fill($table)
-    return $table
+    Write-Output -NoEnumerate $table
 }
 
 function Convert-DataTableRows {
@@ -179,6 +179,54 @@ ORDER BY TABLE_SCHEMA, TABLE_NAME, COLUMN_NAME
     return $candidates | Sort-Object -Property @{Expression = "score"; Descending = $true}, schema, table
 }
 
+function Test-TableExists {
+    param(
+        [System.Data.SqlClient.SqlConnection]$Connection,
+        [string]$Schema,
+        [string]$Table
+    )
+    $sql = "SELECT COUNT(*) AS found FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '$Schema' AND TABLE_NAME = '$Table'"
+    $result = Invoke-Table $Connection $sql
+    return [int]$result.Rows[0].found -gt 0
+}
+
+function Get-ComputaxClientMasterSql {
+    param([int]$TopLimit)
+    return @"
+SELECT TOP $TopLimit
+    CAST(n.codeno AS varchar(80)) AS source_id,
+    NULLIF(LTRIM(RTRIM(COALESCE(NULLIF(n.name, ''), NULLIF(n.businessnm, ''), NULLIF(LTRIM(RTRIM(COALESCE(n.frname, '') + ' ' + COALESCE(n.mdname, '') + ' ' + COALESCE(n.ltname, ''))), '')))), '') AS name,
+    NULLIF(LTRIM(RTRIM(COALESCE(n.statu, ''))), '') AS constitution,
+    NULLIF(LTRIM(RTRIM(COALESCE(n.paccno, ''))), '') AS pan_no,
+    NULLIF(LTRIM(RTRIM(COALESCE(n.GSTIN, ''))), '') AS gst_no,
+    NULLIF(LTRIM(RTRIM(COALESCE(a.mobile, a.mobile2, itr.PMobileNo, pc.Mobile, a.phone1, a.phone2, ''))), '') AS phone,
+    NULLIF(LTRIM(RTRIM(COALESCE(a.mobile, a.mobile2, itr.PMobileNo, pc.Mobile, a.phone1, a.phone2, ''))), '') AS whatsapp,
+    NULLIF(LTRIM(RTRIM(COALESCE(a.mailid1, a.mailid2, itr.PEmailId, pc.Email, ''))), '') AS email,
+    NULLIF(LTRIM(RTRIM(COALESCE(NULLIF(a.addressof, ''), NULLIF(LTRIM(RTRIM(COALESCE(a.flatno, '') + ' ' + COALESCE(a.bunm, '') + ' ' + COALESCE(a.hno, '') + ' ' + COALESCE(a.street, '') + ' ' + COALESCE(a.area, '') + ' ' + COALESCE(a.city, '') + ' ' + COALESCE(a.district, '') + ' ' + COALESCE(a.state, '') + ' ' + COALESCE(a.pin, ''))), ''), pc.Address, ''))), '') AS address,
+    NULLIF(LTRIM(RTRIM(COALESCE(n.businessnm, ''))), '') AS company,
+    NULLIF(LTRIM(RTRIM(COALESCE(n.businessnm, ''))), '') AS work_scope,
+    COALESCE(n.birth, itr.DOB, pc.DOB) AS birth_date,
+    NULLIF(LTRIM(RTRIM(COALESCE(n.nature, ''))), '') AS notes
+FROM dbo.pmnam n
+OUTER APPLY (
+    SELECT TOP 1 *
+    FROM dbo.pmadd a
+    WHERE a.CodeNo = n.codeno AND ISNULL(a.isdeleted, 0) = 0
+    ORDER BY ISNULL(a.IsDefault, 0) DESC, a.addressid
+) a
+LEFT JOIN dbo.pmContactDetailOnITR itr ON itr.CodeNo = n.codeno
+LEFT JOIN dbo.pmcontact pc ON pc.CodeNo = n.codeno
+WHERE ISNULL(n.deactive, 0) = 0
+  AND NULLIF(LTRIM(RTRIM(COALESCE(n.name, n.businessnm, n.frname, ''))), '') IS NOT NULL
+  AND (
+      PATINDEX('%[A-Za-z]%', COALESCE(n.name, '')) > 0
+      OR PATINDEX('%[A-Za-z]%', COALESCE(n.businessnm, '')) > 0
+      OR PATINDEX('%[A-Za-z]%', COALESCE(n.frname, '')) > 0
+  )
+ORDER BY n.name
+"@
+}
+
 function Export-Records {
     param(
         [System.Data.SqlClient.SqlConnection]$Connection,
@@ -221,12 +269,18 @@ try {
     }
 
     if ($Mode -eq "AutoExport" -or $Mode -eq "Push") {
-        $candidate = Get-CandidateTables $connection | Where-Object { $_.score -ge 4 } | Select-Object -First 1
-        if (-not $candidate) {
-            throw "No strong Computax client table candidate found. Run Discover and share the output."
+        if (Test-TableExists $connection "dbo" "pmnam") {
+            $sql = Get-ComputaxClientMasterSql $Limit
+            $sourceName = "Computax:dbo.pmnam"
+        } else {
+            $candidate = Get-CandidateTables $connection | Where-Object { $_.score -ge 4 } | Select-Object -First 1
+            if (-not $candidate) {
+                throw "No strong Computax client table candidate found. Run Discover and share the output."
+            }
+            $sql = "SELECT TOP $Limit * FROM [$($candidate.schema)].[$($candidate.table)]"
+            $sourceName = "Computax:$($candidate.schema).$($candidate.table)"
         }
-        $sql = "SELECT TOP $Limit * FROM [$($candidate.schema)].[$($candidate.table)]"
-        $records = Export-Records $connection $sql "Computax:$($candidate.schema).$($candidate.table)"
+        $records = Export-Records $connection $sql $sourceName
     } else {
         if (-not $QueryFile) {
             throw "QueryFile is required for Export mode."
