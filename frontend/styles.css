@@ -1232,6 +1232,15 @@ label textarea::placeholder {
   color: #858590;
 }
 
+.file-button {
+  cursor: pointer;
+  display: inline-flex;
+}
+
+.file-button input {
+  display: none;
+}
+
 .readonly-field {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.12);

@@ -51,6 +51,7 @@ const state = {
   search: "",
   contactSearch: "",
   externalImportText: "",
+  externalImportFileName: "",
   externalImportPreview: [],
 };
 
@@ -2314,7 +2315,9 @@ function externalImportPanel() {
     null,
     2
   );
-  const rows = state.externalImportPreview
+  const visiblePreview = state.externalImportPreview.slice(0, 60);
+  const hiddenPreviewCount = Math.max(state.externalImportPreview.length - visiblePreview.length, 0);
+  const rows = visiblePreview
     .map((item, index) => {
       const record = item.record || {};
       return `
@@ -2360,17 +2363,25 @@ function externalImportPanel() {
   return `
     <div class="panel">
       <div class="panel-head">
-        <h3>External client data review</h3>
-        <span class="mini">Preview, manually match, then import</span>
+        <h3>Computax Bridge</h3>
+        <span class="mini">Read-only import into GPA</span>
       </div>
-      <div class="task-note">Paste records from Computax Bridge or CSV conversion as JSON. GPA previews matches first and updates only GPA after confirmation.</div>
+      <div class="task-note">Choose the Computax export file from \\\\server\\d\\CompuOffice Online\\GPAExport\\computax_clients.json. GPA previews matches first and updates only GPA after confirmation.</div>
+      <div class="dialog-actions">
+        <label class="secondary-button file-button">
+          Choose Computax JSON
+          <input data-computax-file-input type="file" accept=".json,application/json" />
+        </label>
+        <span class="mini">${escapeHtml(state.externalImportFileName || "No Computax file selected")}</span>
+      </div>
       <textarea data-external-import-input rows="7" placeholder='${escapeHtml(example)}'>${escapeHtml(state.externalImportText)}</textarea>
       <div class="dialog-actions">
         <button class="secondary-button" data-action="preview-external-import" type="button">Preview matches</button>
         <button class="primary-button" data-action="apply-external-import" type="button" ${state.externalImportPreview.length ? "" : "disabled"}>Apply selected matches</button>
       </div>
       <div class="template-list">
-        ${rows || `<div class="empty-state"><strong>No preview yet</strong><span>Paste external client records and preview matches.</span></div>`}
+        ${rows || `<div class="empty-state"><strong>No preview yet</strong><span>Choose the Computax JSON export or paste external records, then preview matches.</span></div>`}
+        ${hiddenPreviewCount ? `<div class="task-note">Showing first ${visiblePreview.length} of ${state.externalImportPreview.length} preview records. Apply selected matches works on the rows currently shown.</div>` : ""}
       </div>
     </div>
   `;
@@ -3320,6 +3331,27 @@ function readExternalImportRecords() {
   return parsed;
 }
 
+function loadComputaxFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const text = String(reader.result || "");
+      const parsed = JSON.parse(text);
+      if (!Array.isArray(parsed)) throw new Error("Computax file must contain a JSON array of client records.");
+      state.externalImportText = text;
+      state.externalImportFileName = `${file.name} (${parsed.length} record${parsed.length === 1 ? "" : "s"})`;
+      state.externalImportPreview = [];
+      renderSettings();
+      window.alert(`Computax export loaded.\nRecords: ${parsed.length}\nNow click Preview matches.`);
+    } catch (error) {
+      window.alert(error.message);
+    }
+  };
+  reader.onerror = () => window.alert("Could not read the selected Computax file.");
+  reader.readAsText(file);
+}
+
 async function previewExternalImport() {
   let records;
   try {
@@ -3664,6 +3696,12 @@ function bindEvents() {
     if (nextInput) {
       nextInput.focus();
       nextInput.setSelectionRange(cursor, cursor);
+    }
+  });
+  document.body.addEventListener("change", (event) => {
+    const computaxFileInput = event.target.closest("[data-computax-file-input]");
+    if (computaxFileInput) {
+      loadComputaxFile(computaxFileInput.files?.[0]);
     }
   });
   document.body.addEventListener("click", (event) => {

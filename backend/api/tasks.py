@@ -889,10 +889,10 @@ def missing_external_client_fields(client: Client | None, contact: Contact | Non
     return missing
 
 
-def external_match_preview(session: Session, record: ExternalClientRecord) -> dict:
+def external_match_preview(session: Session, record: ExternalClientRecord, clients: list[Client] | None = None, contacts: list[Contact] | None = None) -> dict:
     payload = external_record_payload(record)
-    clients = session.exec(select(Client).where(Client.active == True)).all()  # noqa: E712
-    contacts = session.exec(select(Contact).where(Contact.active == True)).all()  # noqa: E712
+    clients = clients if clients is not None else session.exec(select(Client).where(Client.active == True)).all()  # noqa: E712
+    contacts = contacts if contacts is not None else session.exec(select(Contact).where(Contact.active == True)).all()  # noqa: E712
     client_score, client_reasons, client = best_external_match(clients, client_match_score, payload)
     contact_score, contact_reasons, contact = best_external_match(contacts, contact_match_score, payload)
     return {
@@ -2182,7 +2182,9 @@ def import_contacts(import_data: ContactImport, session: Session = Depends(get_s
 
 @router.post("/external-client-data/preview")
 def preview_external_client_data(import_data: ExternalClientPreviewRequest, session: Session = Depends(get_session)):
-    records = [external_match_preview(session, record) for record in import_data.records]
+    clients = session.exec(select(Client).where(Client.active == True)).all()  # noqa: E712
+    contacts = session.exec(select(Contact).where(Contact.active == True)).all()  # noqa: E712
+    records = [external_match_preview(session, record, clients, contacts) for record in import_data.records]
     return {
         "success": True,
         "total": len(records),
