@@ -2386,11 +2386,11 @@ function externalImportPanel() {
       <textarea data-external-import-input rows="7" placeholder='${escapeHtml(example)}'>${escapeHtml(state.externalImportText)}</textarea>
       <div class="dialog-actions">
         <button class="secondary-button" data-action="preview-external-import" type="button">Preview matches</button>
-        <button class="primary-button" data-action="apply-external-import" type="button" ${state.externalImportPreview.length ? "" : "disabled"}>Apply selected matches</button>
+        <button class="primary-button" data-action="apply-external-import" type="button" ${state.externalImportPreview.length ? "" : "disabled"}>Apply all preview records</button>
       </div>
       <div class="template-list">
         ${rows || `<div class="empty-state"><strong>No preview yet</strong><span>Choose the Computax JSON export or paste external records, then preview matches.</span></div>`}
-        ${hiddenPreviewCount ? `<div class="task-note">Showing first ${visiblePreview.length} of ${state.externalImportPreview.length} preview records. Apply selected matches works on the rows currently shown.</div>` : ""}
+        ${hiddenPreviewCount ? `<div class="task-note">Showing first ${visiblePreview.length} of ${state.externalImportPreview.length} preview records. Apply all preview records will also create/import the hidden records when no GPA match is found.</div>` : ""}
       </div>
     </div>
   `;
@@ -3388,12 +3388,14 @@ function externalImportApplyItems() {
     const contactField = els.views.settings.querySelector(`[data-external-contact-index="${index}"]`);
     const createClientField = els.views.settings.querySelector(`[data-external-create-client="${index}"]`);
     const createContactField = els.views.settings.querySelector(`[data-external-create-contact="${index}"]`);
+    const clientId = clientField?.value ? Number(clientField.value) : item.suggested_client_id || null;
+    const contactId = contactField?.value ? Number(contactField.value) : item.suggested_contact_id || null;
     return {
       record: item.record,
-      client_id: clientField?.value ? Number(clientField.value) : null,
-      contact_id: contactField?.value ? Number(contactField.value) : null,
-      create_client: Boolean(createClientField?.checked),
-      create_contact: Boolean(createContactField?.checked),
+      client_id: clientId,
+      contact_id: contactId,
+      create_client: createClientField ? Boolean(createClientField.checked) : !clientId,
+      create_contact: createContactField ? Boolean(createContactField.checked) : !contactId,
     };
   });
 }
@@ -3404,23 +3406,23 @@ async function applyExternalImport() {
     return;
   }
   const items = externalImportApplyItems();
-  const selected = items.filter((item) => item.client_id || item.contact_id || item.create_client || item.create_contact);
-  if (!selected.length) {
-    window.alert("Select at least one match or create option.");
+  const applicable = items.filter((item) => item.client_id || item.contact_id || item.create_client || item.create_contact);
+  if (!applicable.length) {
+    window.alert("No records are available to apply.");
     return;
   }
-  if (!window.confirm(`Apply ${selected.length} external match(es) to GPA? Existing GPA values will not be overwritten.`)) return;
+  if (!window.confirm(`Apply ${applicable.length} external record(s) to GPA? Existing GPA values will not be overwritten.`)) return;
   try {
     const result = await api(`${API_EXTERNAL_CLIENT_DATA_URL}/apply`, {
       method: "POST",
-      body: JSON.stringify({ items: selected, overwrite_existing: false }),
+      body: JSON.stringify({ items: applicable, overwrite_existing: false }),
     });
     await loadClients();
     await loadContacts();
     await loadActivity();
     state.externalImportPreview = [];
     render();
-    window.alert(`External import applied.\nUpdated: ${result.updated}\nUnchanged: ${result.unchanged}`);
+    window.alert(`External import applied.\nCreated: ${result.created}\nUpdated: ${result.updated}\nUnchanged: ${result.unchanged}`);
   } catch (error) {
     window.alert(error.message);
   }

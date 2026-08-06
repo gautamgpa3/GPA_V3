@@ -924,6 +924,8 @@ def apply_external_client_data(session: Session, item: ExternalClientApplyItem, 
     record = external_record_payload(item.record)
     client = session.get(Client, item.client_id) if item.client_id else None
     contact = session.get(Contact, item.contact_id) if item.contact_id else None
+    created: list[str] = []
+    changes: list[str] = []
     if item.client_id and (not client or not client.active):
         raise HTTPException(status_code=400, detail=f"Selected client does not exist: {item.client_id}")
     if item.contact_id and (not contact or not contact.active):
@@ -951,6 +953,8 @@ def apply_external_client_data(session: Session, item: ExternalClientApplyItem, 
             )
             session.add(client)
             session.flush()
+            created.append("client")
+            changes.append("client.created")
     if not contact and item.create_contact:
         if not record["name"]:
             raise HTTPException(status_code=400, detail="Source name is required to create a contact")
@@ -974,7 +978,8 @@ def apply_external_client_data(session: Session, item: ExternalClientApplyItem, 
         )
         session.add(contact)
         session.flush()
-    changes: list[str] = []
+        created.append("contact")
+        changes.append("contact.created")
     if client:
         if contact and client.contact_id != contact.id:
             client.contact_id = contact.id
@@ -1002,6 +1007,7 @@ def apply_external_client_data(session: Session, item: ExternalClientApplyItem, 
         "name": record["name"],
         "client_id": client.id if client else None,
         "contact_id": contact.id if contact else None,
+        "created": created,
         "changes": changes,
     }
 
@@ -2198,20 +2204,23 @@ def apply_external_client_data_import(import_data: ExternalClientApplyRequest, s
     results = []
     for item in import_data.items:
         results.append(apply_external_client_data(session, item, import_data.overwrite_existing))
-    changed = [result for result in results if result["changes"]]
+    created = [result for result in results if result["created"]]
+    changed = [result for result in results if result["changes"] and not result["created"]]
+    unchanged = [result for result in results if not result["changes"]]
     log_activity(
         session,
         "IMPORTED",
         "external-client-data",
-        f"External client data import: {len(changed)} updated, {len(results) - len(changed)} unchanged",
+        f"External client data import: {len(created)} created, {len(changed)} updated, {len(unchanged)} unchanged",
         details=str(results[:20]),
     )
     session.commit()
     return {
         "success": True,
         "total": len(results),
+        "created": len(created),
         "updated": len(changed),
-        "unchanged": len(results) - len(changed),
+        "unchanged": len(unchanged),
         "results": results,
     }
 
