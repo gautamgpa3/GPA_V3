@@ -218,6 +218,7 @@ LEFT JOIN dbo.pmContactDetailOnITR itr ON itr.CodeNo = n.codeno
 LEFT JOIN dbo.pmcontact pc ON pc.CodeNo = n.codeno
 WHERE ISNULL(n.deactive, 0) = 0
   AND n.partyclosedate IS NULL
+  AND NULLIF(LTRIM(RTRIM(COALESCE(n.dactdate, ''))), '') IS NULL
   AND (n.tax = 1 OR n.gst = 1 OR n.tds = 1 OR n.ROC = 1 OR n.bal = 1 OR n.srv = 1 OR n.AllSoftware = 1)
   AND NULLIF(LTRIM(RTRIM(COALESCE(n.name, n.businessnm, n.frname, ''))), '') IS NOT NULL
   AND (
@@ -226,6 +227,29 @@ WHERE ISNULL(n.deactive, 0) = 0
       OR PATINDEX('%[A-Za-z]%', COALESCE(n.frname, '')) > 0
   )
 ORDER BY n.name
+"@
+}
+
+function Get-ComputaxClientMasterSummarySql {
+    return @"
+SELECT
+    COUNT(*) AS source_total,
+    SUM(CASE WHEN ISNULL(n.deactive, 0) = 1 THEN 1 ELSE 0 END) AS excluded_deactive,
+    SUM(CASE WHEN n.partyclosedate IS NOT NULL THEN 1 ELSE 0 END) AS excluded_closed,
+    SUM(CASE WHEN NULLIF(LTRIM(RTRIM(COALESCE(n.dactdate, ''))), '') IS NOT NULL THEN 1 ELSE 0 END) AS excluded_deactivation_date,
+    SUM(CASE WHEN NOT (n.tax = 1 OR n.gst = 1 OR n.tds = 1 OR n.ROC = 1 OR n.bal = 1 OR n.srv = 1 OR n.AllSoftware = 1) THEN 1 ELSE 0 END) AS excluded_no_active_module,
+    SUM(CASE WHEN ISNULL(n.deactive, 0) = 0
+        AND n.partyclosedate IS NULL
+        AND NULLIF(LTRIM(RTRIM(COALESCE(n.dactdate, ''))), '') IS NULL
+        AND (n.tax = 1 OR n.gst = 1 OR n.tds = 1 OR n.ROC = 1 OR n.bal = 1 OR n.srv = 1 OR n.AllSoftware = 1)
+        AND NULLIF(LTRIM(RTRIM(COALESCE(n.name, n.businessnm, n.frname, ''))), '') IS NOT NULL
+        AND (
+            PATINDEX('%[A-Za-z]%', COALESCE(n.name, '')) > 0
+            OR PATINDEX('%[A-Za-z]%', COALESCE(n.businessnm, '')) > 0
+            OR PATINDEX('%[A-Za-z]%', COALESCE(n.frname, '')) > 0
+        )
+    THEN 1 ELSE 0 END) AS exported_by_filter
+FROM dbo.pmnam n
 "@
 }
 
@@ -265,6 +289,7 @@ function Push-ToGpa {
 
 $connection = New-Connection
 try {
+    $sourceSummary = $null
     if ($Mode -eq "Discover") {
         Get-CandidateTables $connection | Select-Object -First 80 | ConvertTo-Json -Depth 4
         return
@@ -273,6 +298,7 @@ try {
     if ($Mode -eq "AutoExport" -or $Mode -eq "Push") {
         if (Test-TableExists $connection "dbo" "pmnam") {
             $sql = Get-ComputaxClientMasterSql $Limit
+            $sourceSummary = Convert-DataTableRows (Invoke-Table $connection (Get-ComputaxClientMasterSummarySql)) | Select-Object -First 1
             $sourceName = "Computax:dbo.pmnam"
         } else {
             $candidate = Get-CandidateTables $connection | Where-Object { $_.score -ge 4 } | Select-Object -First 1
@@ -301,7 +327,8 @@ try {
         success = $true
         records = $records.Count
         output = (Resolve-Path $OutputPath).Path
-    } | ConvertTo-Json
+        source_summary = $sourceSummary
+    } | ConvertTo-Json -Depth 4
 } finally {
     $connection.Close()
 }

@@ -23,6 +23,7 @@ LEFT JOIN dbo.pmContactDetailOnITR itr ON itr.CodeNo = n.codeno
 LEFT JOIN dbo.pmcontact pc ON pc.CodeNo = n.codeno
 WHERE ISNULL(n.deactive, 0) = 0
   AND n.partyclosedate IS NULL
+  AND NULLIF(LTRIM(RTRIM(COALESCE(n.dactdate, ''))), '') IS NULL
   AND (n.tax = 1 OR n.gst = 1 OR n.tds = 1 OR n.ROC = 1 OR n.bal = 1 OR n.srv = 1 OR n.AllSoftware = 1)
   AND NULLIF(LTRIM(RTRIM(COALESCE(n.name, n.businessnm, n.frname, ''))), '') IS NOT NULL
   AND (
