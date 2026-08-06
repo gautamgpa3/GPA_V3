@@ -133,6 +133,74 @@ function Convert-ToBridgeRecord {
     }
 }
 
+function Normalize-DedupeText {
+    param([string]$Value)
+    if (-not $Value) {
+        return ""
+    }
+    return (($Value.Trim().ToLowerInvariant()) -replace "[^a-z0-9]", "")
+}
+
+function Get-BridgeRecordDedupeKey {
+    param([object]$Record)
+    if ($Record.gst_no) {
+        return "gst:$($Record.gst_no.Trim().ToUpperInvariant())"
+    }
+    if ($Record.pan_no) {
+        return "pan-name:$($Record.pan_no.Trim().ToUpperInvariant()):$(Normalize-DedupeText $Record.name)"
+    }
+    return "name:$(Normalize-DedupeText $Record.name):$(Normalize-DedupeText $Record.constitution)"
+}
+
+function Get-BridgeRecordCompletenessScore {
+    param([object]$Record)
+    $score = 0
+    foreach ($field in @("name", "constitution", "pan_no", "gst_no", "phone", "whatsapp", "email", "address", "company", "work_scope", "birth_date", "notes")) {
+        if ($Record.$field) {
+            $score += 1
+        }
+    }
+    return $score
+}
+
+function Merge-BridgeRecords {
+    param(
+        [object]$Primary,
+        [object]$Secondary
+    )
+    foreach ($field in @("name", "constitution", "pan_no", "gst_no", "phone", "whatsapp", "email", "address", "company", "work_scope", "birth_date", "notes")) {
+        if (-not $Primary.$field -and $Secondary.$field) {
+            $Primary.$field = $Secondary.$field
+        }
+    }
+    return $Primary
+}
+
+function Remove-DuplicateBridgeRecords {
+    param([object[]]$Records)
+    $unique = [ordered]@{}
+    $duplicates = 0
+    foreach ($record in $Records) {
+        $key = Get-BridgeRecordDedupeKey $record
+        if (-not $unique.Contains($key)) {
+            $unique[$key] = $record
+            continue
+        }
+
+        $duplicates += 1
+        $existing = $unique[$key]
+        if ((Get-BridgeRecordCompletenessScore $record) -gt (Get-BridgeRecordCompletenessScore $existing)) {
+            $unique[$key] = Merge-BridgeRecords $record $existing
+        } else {
+            $unique[$key] = Merge-BridgeRecords $existing $record
+        }
+    }
+    return [pscustomobject]@{
+        records = @($unique.Values)
+        duplicates_removed = $duplicates
+    }
+}
+
 function Get-CandidateTables {
     param([System.Data.SqlClient.SqlConnection]$Connection)
     $sql = @"
@@ -267,7 +335,7 @@ function Export-Records {
             $records += [pscustomobject]$record
         }
     }
-    return $records
+    return Remove-DuplicateBridgeRecords $records
 }
 
 function Push-ToGpa {
@@ -308,15 +376,16 @@ try {
             $sql = "SELECT TOP $Limit * FROM [$($candidate.schema)].[$($candidate.table)]"
             $sourceName = "Computax:$($candidate.schema).$($candidate.table)"
         }
-        $records = Export-Records $connection $sql $sourceName
+        $exportResult = Export-Records $connection $sql $sourceName
     } else {
         if (-not $QueryFile) {
             throw "QueryFile is required for Export mode."
         }
         $sql = Get-Content -LiteralPath $QueryFile -Raw
-        $records = Export-Records $connection $sql "Computax:$QueryFile"
+        $exportResult = Export-Records $connection $sql "Computax:$QueryFile"
     }
 
+    $records = @($exportResult.records)
     if ($Mode -eq "Push") {
         Push-ToGpa $records $GpaUrl $GpaUsername $GpaPassword | ConvertTo-Json -Depth 8
         return
@@ -326,6 +395,7 @@ try {
     [pscustomobject]@{
         success = $true
         records = $records.Count
+        duplicates_removed = $exportResult.duplicates_removed
         output = (Resolve-Path $OutputPath).Path
         source_summary = $sourceSummary
     } | ConvertTo-Json -Depth 4
