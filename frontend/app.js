@@ -410,7 +410,7 @@ function priorityWeight(priority) {
 }
 
 function activeStatuses() {
-  return state.master.statuses.filter((status) => !["Completed", "Cancelled"].includes(status));
+  return state.master.statuses.filter((status) => !isDoneStatus(status));
 }
 
 function boardGroups() {
@@ -443,6 +443,10 @@ function normalizeTask(task) {
     archived: Boolean(task.archived),
     telegram_sent: Boolean(task.telegram_sent),
   };
+}
+
+function isDoneStatus(status = "") {
+  return ["completed", "cancelled", "done", "ok"].includes(String(status || "").trim().toLowerCase());
 }
 
 function taskUpdatePayload(task, overrides = {}) {
@@ -810,7 +814,7 @@ function populateMasterControls() {
 function taskDerived(task) {
   const daysLeft = diffDays(task.due_date);
   const age = Math.max(0, -diffDays(task.start_date || todayISO()));
-  const isDone = ["Completed", "Cancelled"].includes(task.status);
+  const isDone = isDoneStatus(task.status);
   const hasStarted = diffDays(task.start_date || todayISO()) <= 0;
   const activeToday = hasStarted && !isDone && !task.archived;
   const overdue = Boolean(task.due_date && daysLeft < 0 && !isDone);
@@ -825,7 +829,7 @@ function openTasks() {
 
 function completedTasks() {
   return state.tasks
-    .filter((task) => task.status === "Completed" && !task.archived)
+    .filter((task) => isDoneStatus(task.status) && !task.archived)
     .sort((a, b) => (b.completed_at || b.updated_at || "").localeCompare(a.completed_at || a.updated_at || ""));
 }
 
@@ -938,11 +942,16 @@ function filteredTasks() {
 
 async function completeTask(task) {
   if (!window.confirm(`Mark "${taskDisplayTitle(task)}" as completed?`)) return;
-  const completedTask = normalizeTask(await api(`${API_TASKS_URL}/${task.id}/complete`, { method: "PUT" }));
+  const result = await api(`${API_TASKS_URL}/${task.id}/complete`, { method: "PUT" });
+  const completedTask = normalizeTask(result.task || result);
   await loadTasks();
   await loadDueMessages();
   await loadActivity();
   render();
+  if (result.next_task) {
+    const nextTask = normalizeTask(result.next_task);
+    window.alert(`Completed: ${taskDisplayTitle(completedTask)}\n\nNext recurring work created:\n${taskDisplayTitle(nextTask)}\nStart: ${formatDate(nextTask.start_date)}\nDue: ${formatDate(nextTask.due_date)}`);
+  }
   sendTaskStageWhatsApp(completedTask, "completed", task);
 }
 

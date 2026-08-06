@@ -1543,7 +1543,7 @@ def task_status_key(task: Task) -> str:
 
 
 def task_is_done(task: Task) -> bool:
-    return task_status_key(task) in {"completed", "cancelled"}
+    return task_status_key(task) in {"completed", "cancelled", "done", "ok"}
 
 
 def task_has_started(task: Task, today: date | None = None) -> bool:
@@ -2580,6 +2580,7 @@ def update_task(task_id: int, task_data: TaskUpdate, session: Session = Depends(
 @router.put("/tasks/{task_id}/complete")
 def complete_task(task_id: int, session: Session = Depends(get_session)):
     task = get_task_or_404(task_id, session)
+    next_task = None
     if task.status != "Completed":
         task.status = "Completed"
         task.completed_at = now()
@@ -2587,10 +2588,12 @@ def complete_task(task_id: int, session: Session = Depends(get_session)):
         session.add(task)
         log_activity(session, "COMPLETED", "task", f"Completed task: {task.title}", task.id, task.uuid)
         send_task_stage_whatsapp(session, task, "completed")
-        add_next_occurrence(session, task)
+        next_task = add_next_occurrence(session, task)
     session.commit()
     session.refresh(task)
-    return task
+    if next_task:
+        session.refresh(next_task)
+    return {"success": True, "task": task, "next_task": next_task}
 
 
 @router.delete("/tasks/{task_id}")
