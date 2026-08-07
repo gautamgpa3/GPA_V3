@@ -8,7 +8,8 @@ param(
     [int]$Limit = 15000,
     [string]$GpaUrl = "",
     [string]$GpaUsername = "",
-    [string]$GpaPassword = ""
+    [string]$GpaPassword = "",
+    [string]$PartySelectionUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -258,8 +259,62 @@ function Test-TableExists {
     return [int]$result.Rows[0].found -gt 0
 }
 
+function Get-PartySelectionDataUrl {
+    param([string]$Url)
+    if (-not $Url) {
+        return ""
+    }
+    $uri = [System.Uri]$Url
+    $basePath = $uri.AbsolutePath
+    $pageIndex = $basePath.LastIndexOf("/")
+    if ($pageIndex -lt 0) {
+        throw "Invalid PartySelectionUrl."
+    }
+    $folderPath = $basePath.Substring(0, $pageIndex + 1)
+    $builder = [System.UriBuilder]::new($uri.Scheme, $uri.Host, $uri.Port, ($folderPath + "frmSelectPartyXML.aspx"))
+    $builder.Query = "ReqType=GetData&sw=0~1~~"
+    return $builder.Uri.AbsoluteUri
+}
+
+function Get-LivePartyCodes {
+    param([string]$Url)
+    if (-not $Url) {
+        return @()
+    }
+    $dataUrl = Get-PartySelectionDataUrl $Url
+    $response = Invoke-WebRequest -Uri $dataUrl -UseBasicParsing -TimeoutSec 60
+    $content = $response.Content.TrimStart([char]0xFEFF)
+    $rows = $content | ConvertFrom-Json
+    $codes = New-Object System.Collections.Generic.List[string]
+    foreach ($row in $rows) {
+        if ($row.CodeNo) {
+            $code = "$($row.CodeNo)".Trim()
+            if ($code -and -not $codes.Contains($code)) {
+                $codes.Add($code)
+            }
+        }
+    }
+    return $codes.ToArray()
+}
+
+function Join-SqlStringList {
+    param([string[]]$Values)
+    return (($Values | ForEach-Object { "'" + ($_.Replace("'", "''")) + "'" }) -join ",")
+}
+
 function Get-ComputaxClientMasterSql {
-    param([int]$TopLimit)
+    param(
+        [int]$TopLimit,
+        [string[]]$CodeNos = @()
+    )
+    $wherePrefix = @"
+WHERE ISNULL(n.deactive, 0) = 0
+  AND n.partyclosedate IS NULL
+  AND NULLIF(LTRIM(RTRIM(COALESCE(n.dactdate, ''))), '') IS NULL
+"@
+    if ($CodeNos.Count -gt 0) {
+        $wherePrefix = "WHERE LTRIM(RTRIM(n.codeno)) IN ($(Join-SqlStringList $CodeNos))"
+    }
     return @"
 SELECT TOP $TopLimit
     CAST(n.codeno AS varchar(80)) AS source_id,
@@ -282,12 +337,23 @@ OUTER APPLY (
     WHERE a.CodeNo = n.codeno AND ISNULL(a.isdeleted, 0) = 0
     ORDER BY ISNULL(a.IsDefault, 0) DESC, a.addressid
 ) a
-LEFT JOIN dbo.pmContactDetailOnITR itr ON itr.CodeNo = n.codeno
-LEFT JOIN dbo.pmcontact pc ON pc.CodeNo = n.codeno
-WHERE ISNULL(n.deactive, 0) = 0
-  AND n.partyclosedate IS NULL
-  AND NULLIF(LTRIM(RTRIM(COALESCE(n.dactdate, ''))), '') IS NULL
-  AND (n.tax = 1 OR n.gst = 1 OR n.tds = 1 OR n.ROC = 1 OR n.bal = 1 OR n.srv = 1 OR n.AllSoftware = 1)
+OUTER APPLY (
+    SELECT TOP 1 *
+    FROM dbo.pmContactDetailOnITR itr
+    WHERE itr.CodeNo = n.codeno
+) itr
+OUTER APPLY (
+    SELECT TOP 1 *
+    FROM dbo.pmcontact pc
+    WHERE pc.CodeNo = n.codeno
+) pc
+$wherePrefix
+  AND n.ID = (
+      SELECT TOP 1 n2.ID
+      FROM dbo.pmnam n2
+      WHERE LTRIM(RTRIM(n2.codeno)) = LTRIM(RTRIM(n.codeno))
+      ORDER BY n2.ID DESC
+  )
   AND NULLIF(LTRIM(RTRIM(COALESCE(n.name, n.businessnm, n.frname, ''))), '') IS NOT NULL
   AND (
       PATINDEX('%[A-Za-z]%', COALESCE(n.name, '')) > 0
@@ -325,7 +391,8 @@ function Export-Records {
     param(
         [System.Data.SqlClient.SqlConnection]$Connection,
         [string]$Sql,
-        [string]$SourceName
+        [string]$SourceName,
+        [bool]$Deduplicate = $true
     )
     $rows = Convert-DataTableRows (Invoke-Table $Connection $Sql)
     $records = @()
@@ -333,6 +400,12 @@ function Export-Records {
         $record = Convert-ToBridgeRecord $row $SourceName
         if ($record.name -or $record.pan_no -or $record.gst_no -or $record.phone -or $record.email) {
             $records += [pscustomobject]$record
+        }
+    }
+    if (-not $Deduplicate) {
+        return [pscustomobject]@{
+            records = @($records)
+            duplicates_removed = 0
         }
     }
     return Remove-DuplicateBridgeRecords $records
@@ -358,6 +431,7 @@ function Push-ToGpa {
 $connection = New-Connection
 try {
     $sourceSummary = $null
+    $livePartyCodes = @()
     if ($Mode -eq "Discover") {
         Get-CandidateTables $connection | Select-Object -First 80 | ConvertTo-Json -Depth 4
         return
@@ -365,7 +439,8 @@ try {
 
     if ($Mode -eq "AutoExport" -or $Mode -eq "Push") {
         if (Test-TableExists $connection "dbo" "pmnam") {
-            $sql = Get-ComputaxClientMasterSql $Limit
+            $livePartyCodes = Get-LivePartyCodes $PartySelectionUrl
+            $sql = Get-ComputaxClientMasterSql $Limit $livePartyCodes
             $sourceSummary = Convert-DataTableRows (Invoke-Table $connection (Get-ComputaxClientMasterSummarySql)) | Select-Object -First 1
             $sourceName = "Computax:dbo.pmnam"
         } else {
@@ -376,7 +451,7 @@ try {
             $sql = "SELECT TOP $Limit * FROM [$($candidate.schema)].[$($candidate.table)]"
             $sourceName = "Computax:$($candidate.schema).$($candidate.table)"
         }
-        $exportResult = Export-Records $connection $sql $sourceName
+        $exportResult = Export-Records $connection $sql $sourceName ($livePartyCodes.Count -eq 0)
     } else {
         if (-not $QueryFile) {
             throw "QueryFile is required for Export mode."
@@ -391,11 +466,13 @@ try {
         return
     }
 
-    $records | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $OutputPath -Encoding UTF8
+    $recordsJson = if ($records.Count -gt 0) { $records | ConvertTo-Json -Depth 8 } else { "[]" }
+    $recordsJson | Set-Content -LiteralPath $OutputPath -Encoding UTF8
     [pscustomobject]@{
         success = $true
         records = $records.Count
         duplicates_removed = $exportResult.duplicates_removed
+        live_master_count = $livePartyCodes.Count
         output = (Resolve-Path $OutputPath).Path
         source_summary = $sourceSummary
     } | ConvertTo-Json -Depth 4

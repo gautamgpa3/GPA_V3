@@ -19,11 +19,25 @@ OUTER APPLY (
     WHERE a.CodeNo = n.codeno AND ISNULL(a.isdeleted, 0) = 0
     ORDER BY ISNULL(a.IsDefault, 0) DESC, a.addressid
 ) a
-LEFT JOIN dbo.pmContactDetailOnITR itr ON itr.CodeNo = n.codeno
-LEFT JOIN dbo.pmcontact pc ON pc.CodeNo = n.codeno
+OUTER APPLY (
+    SELECT TOP 1 *
+    FROM dbo.pmContactDetailOnITR itr
+    WHERE itr.CodeNo = n.codeno
+) itr
+OUTER APPLY (
+    SELECT TOP 1 *
+    FROM dbo.pmcontact pc
+    WHERE pc.CodeNo = n.codeno
+) pc
 WHERE ISNULL(n.deactive, 0) = 0
   AND n.partyclosedate IS NULL
   AND NULLIF(LTRIM(RTRIM(COALESCE(n.dactdate, ''))), '') IS NULL
+  AND n.ID = (
+      SELECT TOP 1 n2.ID
+      FROM dbo.pmnam n2
+      WHERE LTRIM(RTRIM(n2.codeno)) = LTRIM(RTRIM(n.codeno))
+      ORDER BY n2.ID DESC
+  )
   AND (n.tax = 1 OR n.gst = 1 OR n.tds = 1 OR n.ROC = 1 OR n.bal = 1 OR n.srv = 1 OR n.AllSoftware = 1)
   AND NULLIF(LTRIM(RTRIM(COALESCE(n.name, n.businessnm, n.frname, ''))), '') IS NOT NULL
   AND (
