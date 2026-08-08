@@ -28,6 +28,8 @@ class Contact(SQLModel, table=True):
     notes: str = ""
     google_resource_name: str = ""
     google_etag: str = ""
+    google_sync_snapshot: str = ""
+    google_last_synced_at: datetime | None = None
     active: bool = True
     created_at: datetime = Field(default_factory=datetime.now)
     updated_at: datetime = Field(default_factory=datetime.now)

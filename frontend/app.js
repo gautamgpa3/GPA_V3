@@ -1729,7 +1729,7 @@ function renderContacts() {
         </label>
         <div class="task-meta">${contacts.length} of ${state.contacts.length} contact(s)</div>
       </div>
-      <div class="task-note">2-way Google pulls Google changes into GPA, then creates or updates Google contacts from GPA. Nothing is deleted.</div>
+      <div class="task-note">2-way Google pulls Google changes into GPA, then creates or updates Google contacts from GPA. Field conflicts are skipped for manual review; nothing is deleted.</div>
       <div class="contact-list">
         ${contacts
           .map((contact) => {
@@ -1931,6 +1931,7 @@ async function syncGoogleContacts() {
     if (result.visible_contacts !== undefined) diagnostics.push(`Visible GPA contacts: ${result.visible_contacts}`);
     if (result.updated_contacts !== undefined) diagnostics.push(`Unique updated contacts: ${result.updated_contacts}`);
     if (result.merged_google_contacts !== undefined) diagnostics.push(`Merged duplicate Google rows: ${result.merged_google_contacts}`);
+    if (result.field_conflicts) diagnostics.push(`Field conflicts protected: ${result.field_conflicts}`);
     if (result.google_fetched !== undefined) {
       diagnostics.push(`Google fetched: ${result.google_fetched}`);
       diagnostics.push(`Parsed: ${result.google_parsed}`);
@@ -2025,7 +2026,8 @@ async function syncOneGoogleContact(contactId) {
     await loadContacts();
     await loadActivity();
     render();
-    window.alert(result.message || `Google contact sync complete. Updated: ${result.updated}, Skipped: ${result.skipped}`);
+    const conflicts = result.conflict_fields?.length ? `\nConflict fields: ${result.conflict_fields.join(", ")}` : "";
+    window.alert(`${result.message || `Google contact sync complete. Updated: ${result.updated}, Skipped: ${result.skipped}`}${conflicts}`);
   } catch (error) {
     window.alert(error.message);
   }
@@ -2038,7 +2040,8 @@ async function pushGoogleContacts() {
     await loadContacts();
     await loadActivity();
     render();
-    window.alert(`Google push complete. Created in Google: ${result.created}, Updated in Google: ${result.updated}, Skipped: ${result.skipped}`);
+    const conflicts = result.field_conflicts ? `\nProtected field conflicts: ${result.field_conflicts}` : "";
+    window.alert(`Google push complete. Created in Google: ${result.created}, Updated in Google: ${result.updated}, Skipped: ${result.skipped}${conflicts}`);
   } catch (error) {
     window.alert(error.message);
   }
@@ -2055,7 +2058,7 @@ async function syncGoogleContactsTwoWay() {
     render();
     const pull = result.pull || {};
     const push = result.push || {};
-    window.alert(`2-way Google sync complete.\n\nPulled into GPA\nCreated: ${pull.created || 0}\nUpdated rows: ${pull.updated || 0}\nSkipped: ${pull.skipped || 0}\n\nPushed to Google\nCreated: ${push.created || 0}\nUpdated: ${push.updated || 0}\nSkipped: ${push.skipped || 0}`);
+    window.alert(`2-way Google sync complete.\n\nPulled into GPA\nCreated: ${pull.created || 0}\nUpdated rows: ${pull.updated || 0}\nSkipped: ${pull.skipped || 0}\nField conflicts protected: ${pull.field_conflicts || 0}\n\nPushed to Google\nCreated: ${push.created || 0}\nUpdated: ${push.updated || 0}\nSkipped: ${push.skipped || 0}\nField conflicts protected: ${push.field_conflicts || 0}`);
   } catch (error) {
     window.alert(error.message);
   }

@@ -23,6 +23,25 @@ PEOPLE_CREATE_CONTACT_URL = "https://people.googleapis.com/v1/people:createConta
 PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,biographies,birthdays,events,relations,urls,metadata"
 UPDATE_PERSON_FIELDS = "names,emailAddresses,phoneNumbers,organizations,addresses,biographies,birthdays,events,relations,urls"
 PERSONAL_BIRTHDATE_CONSTITUTIONS = {"Individual", "Proprietorship"}
+GOOGLE_SYNC_FIELDS = [
+    "name",
+    "first_name",
+    "last_name",
+    "phone",
+    "phone_label",
+    "whatsapp",
+    "whatsapp_label",
+    "email",
+    "company",
+    "address",
+    "location_url",
+    "birth_date",
+    "important_date",
+    "important_date_label",
+    "related_name",
+    "social_profile",
+    "notes",
+]
 
 
 @dataclass
@@ -160,11 +179,22 @@ def google_label(items: list[dict] | None, fallback: str) -> str:
     return str(items[0].get("formattedType") or items[0].get("type") or fallback).strip() or fallback
 
 
+def clean_google_name_parts(first_name: str, last_name: str) -> tuple[str, str]:
+    first_name = " ".join(first_name.split())
+    last_name = " ".join(last_name.split())
+    if first_name and last_name and first_name.casefold().endswith(f" {last_name.casefold()}"):
+        return first_name, ""
+    if first_name and last_name and first_name.casefold() == last_name.casefold():
+        return first_name, ""
+    return first_name, last_name
+
+
 def parse_google_person(person: dict) -> ParsedGoogleContact | None:
     names = person.get("names") or []
     primary_name = names[0] if names else {}
     first_name = str(primary_name.get("givenName") or "").strip()
     last_name = str(primary_name.get("familyName") or "").strip()
+    first_name, last_name = clean_google_name_parts(first_name, last_name)
     name = str(primary_name.get("displayName") or "").strip()
     if not name:
         name = " ".join(part for part in (first_name, last_name) if part).strip()
@@ -255,6 +285,94 @@ def find_google_match(session: Session, contact: ParsedGoogleContact) -> Contact
     return next((existing for existing in contacts if existing.name.strip().casefold() == normalized_name), None)
 
 
+def sync_value(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, date):
+        return value.isoformat()
+    return str(value or "").strip()
+
+
+def google_snapshot_values(item: ParsedGoogleContact | Contact) -> dict[str, str]:
+    return {field: sync_value(getattr(item, field, "")) for field in GOOGLE_SYNC_FIELDS}
+
+
+def load_google_snapshot(contact: Contact) -> dict[str, str]:
+    if not contact.google_sync_snapshot:
+        return {}
+    try:
+        snapshot = json.loads(contact.google_sync_snapshot)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(snapshot, dict):
+        return {}
+    return {field: sync_value(snapshot.get(field, "")) for field in GOOGLE_SYNC_FIELDS}
+
+
+def store_google_snapshot(contact: Contact, values: dict[str, str] | ParsedGoogleContact | Contact) -> None:
+    snapshot = google_snapshot_values(values) if not isinstance(values, dict) else {field: sync_value(values.get(field, "")) for field in GOOGLE_SYNC_FIELDS}
+    contact.google_sync_snapshot = json.dumps(snapshot, sort_keys=True, separators=(",", ":"))
+    contact.google_last_synced_at = datetime.now()
+
+
+def set_contact_field_from_google(contact: Contact, field: str, value: str) -> None:
+    if field in {"birth_date", "important_date"}:
+        setattr(contact, field, date.fromisoformat(value) if value else None)
+        return
+    setattr(contact, field, value)
+
+
+def apply_google_contact(contact: Contact, item: ParsedGoogleContact) -> list[str]:
+    conflicts: list[str] = []
+    previous_google = load_google_snapshot(contact)
+    incoming_google = google_snapshot_values(item)
+    current_local = google_snapshot_values(contact)
+
+    for field in GOOGLE_SYNC_FIELDS:
+        google_value = incoming_google[field]
+        local_value = current_local[field]
+        previous_value = previous_google.get(field, "") if previous_google else ""
+        local_changed = bool(previous_google) and local_value != previous_value
+        google_changed = (not previous_google and bool(google_value)) or google_value != previous_value
+        both_changed = local_changed and google_changed and local_value != google_value
+        if both_changed:
+            conflicts.append(field)
+    if conflicts:
+        return conflicts
+
+    for field in GOOGLE_SYNC_FIELDS:
+        google_value = incoming_google[field]
+        previous_value = previous_google.get(field, "") if previous_google else ""
+        google_changed = (not previous_google and bool(google_value)) or google_value != previous_value
+        if google_changed:
+            if google_value or previous_value:
+                set_contact_field_from_google(contact, field, google_value)
+
+    contact.google_resource_name = item.google_resource_name or contact.google_resource_name
+    contact.google_etag = item.google_etag or contact.google_etag
+    contact.active = True
+    contact.updated_at = datetime.now()
+    store_google_snapshot(contact, incoming_google)
+    return []
+
+
+def google_push_conflicts(contact: Contact, google_contact: ParsedGoogleContact | None) -> list[str]:
+    if not google_contact:
+        return []
+    previous_google = load_google_snapshot(contact)
+    if not previous_google:
+        return ["initial Google snapshot missing"]
+    incoming_google = google_snapshot_values(google_contact)
+    current_local = google_snapshot_values(contact)
+    conflicts: list[str] = []
+    for field in GOOGLE_SYNC_FIELDS:
+        google_changed = incoming_google[field] != previous_google.get(field, "")
+        local_changed = current_local[field] != previous_google.get(field, "")
+        if google_changed:
+            conflicts.append(field if local_changed else f"{field} changed in Google")
+    return conflicts
+
+
 def deleted_contact_name(session: Session, contact: Contact) -> str:
     base = f"{contact.name} (deleted {contact.id})"
     candidate = base
@@ -295,30 +413,6 @@ def release_inactive_google_conflicts(session: Session, target: Contact, google_
             session.add(existing)
 
 
-def apply_google_contact(contact: Contact, item: ParsedGoogleContact) -> None:
-    contact.name = item.name or contact.name
-    contact.first_name = item.first_name or contact.first_name
-    contact.last_name = item.last_name or contact.last_name
-    contact.phone = item.phone or contact.phone
-    contact.phone_label = item.phone_label or contact.phone_label or "Mobile"
-    contact.whatsapp = item.whatsapp or item.phone or contact.whatsapp
-    contact.whatsapp_label = item.whatsapp_label or contact.whatsapp_label or "WhatsApp"
-    contact.email = item.email or contact.email
-    contact.company = item.company or contact.company
-    contact.address = item.address or contact.address
-    contact.location_url = item.location_url or contact.location_url
-    contact.birth_date = item.birth_date or contact.birth_date
-    contact.important_date = item.important_date or contact.important_date
-    contact.important_date_label = item.important_date_label or contact.important_date_label
-    contact.related_name = item.related_name or contact.related_name
-    contact.social_profile = item.social_profile or contact.social_profile
-    contact.notes = item.notes or contact.notes
-    contact.google_resource_name = item.google_resource_name or contact.google_resource_name
-    contact.google_etag = item.google_etag or contact.google_etag
-    contact.active = True
-    contact.updated_at = datetime.now()
-
-
 def sync_linked_clients_from_contact(session: Session, contact: Contact) -> None:
     linked_clients = session.exec(select(Client).where(Client.contact_id == contact.id, Client.active == True)).all()  # noqa: E712
     for client in linked_clients:
@@ -338,6 +432,7 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
     created = 0
     updated = 0
     skipped = 0
+    field_conflicts = 0
     updated_contact_ids: set[int] = set()
     merged_google_contacts = 0
     for item in contacts:
@@ -353,7 +448,11 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
                 updated_contact_ids.add(existing.id)
             if not dry_run:
                 release_inactive_google_conflicts(session, existing, item)
-                apply_google_contact(existing, item)
+                conflicts = apply_google_contact(existing, item)
+                if conflicts:
+                    field_conflicts += 1
+                    skipped += 1
+                    continue
                 session.add(existing)
                 sync_linked_clients_from_contact(session, existing)
             updated += 1
@@ -362,30 +461,30 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
             skipped += 1
             continue
         if not dry_run:
-            session.add(
-                Contact(
-                    name=item.name,
-                    first_name=item.first_name,
-                    last_name=item.last_name,
-                    phone=item.phone,
-                    phone_label=item.phone_label,
-                    whatsapp=item.whatsapp or item.phone,
-                    whatsapp_label=item.whatsapp_label,
-                    email=item.email,
-                    company=item.company,
-                    address=item.address,
-                    location_url=item.location_url,
-                    birth_date=item.birth_date,
-                    important_date=item.important_date,
-                    important_date_label=item.important_date_label,
-                    related_name=item.related_name,
-                    social_profile=item.social_profile,
-                    notes=item.notes,
-                    google_resource_name=item.google_resource_name,
-                    google_etag=item.google_etag,
-                    updated_at=datetime.now(),
-                )
+            contact = Contact(
+                name=item.name,
+                first_name=item.first_name,
+                last_name=item.last_name,
+                phone=item.phone,
+                phone_label=item.phone_label,
+                whatsapp=item.whatsapp or item.phone,
+                whatsapp_label=item.whatsapp_label,
+                email=item.email,
+                company=item.company,
+                address=item.address,
+                location_url=item.location_url,
+                birth_date=item.birth_date,
+                important_date=item.important_date,
+                important_date_label=item.important_date_label,
+                related_name=item.related_name,
+                social_profile=item.social_profile,
+                notes=item.notes,
+                google_resource_name=item.google_resource_name,
+                google_etag=item.google_etag,
+                updated_at=datetime.now(),
             )
+            store_google_snapshot(contact, item)
+            session.add(contact)
         created += 1
     if not dry_run:
         session.add(
@@ -409,6 +508,7 @@ def upsert_google_contacts(session: Session, contacts: list[ParsedGoogleContact]
         "updated_contacts": len(updated_contact_ids),
         "merged_google_contacts": merged_google_contacts,
         "skipped": skipped,
+        "field_conflicts": field_conflicts,
         "visible_contacts": active_contacts,
         "total": len(contacts),
         "dry_run": dry_run,
@@ -425,11 +525,13 @@ def google_person_date(value: date | None) -> dict | None:
 
 
 def build_google_person(contact: Contact) -> dict:
-    name_parts = contact.name.split()
-    name = {"givenName": contact.first_name or (name_parts[0] if name_parts else contact.name)}
-    family_name = contact.last_name or (" ".join(name_parts[1:]) if len(name_parts) > 1 else "")
-    if family_name:
-        name["familyName"] = family_name
+    name: dict[str, str] = {}
+    if contact.first_name:
+        name["givenName"] = contact.first_name
+    if contact.last_name:
+        name["familyName"] = contact.last_name
+    if not name:
+        name["givenName"] = contact.name
     person: dict[str, list[dict]] = {"names": [name]}
     phone = contact.whatsapp or contact.phone
     if phone:
@@ -634,7 +736,19 @@ def sync_single_google_contact(session: Session, contact_id: int, dry_run: bool 
         }
     if not dry_run:
         release_inactive_google_conflicts(session, contact, match)
-        apply_google_contact(contact, match)
+        conflicts = apply_google_contact(contact, match)
+        if conflicts:
+            return {
+                "success": True,
+                "created": 0,
+                "updated": 0,
+                "skipped": 1,
+                "field_conflicts": 1,
+                "conflict_fields": conflicts,
+                "total": 1,
+                "dry_run": dry_run,
+                "message": f"Skipped {contact.name}: Google and GPA both changed {', '.join(conflicts)}. Please review manually.",
+            }
         session.add(contact)
         session.add(
             ActivityLog(
@@ -668,11 +782,24 @@ def push_gpa_contacts_to_google(session: Session, dry_run: bool = False, credent
     syncable = [contact for contact in contacts if contact.name and (contact.phone or contact.whatsapp or contact.email)]
     missing = [contact for contact in syncable if not contact.google_resource_name]
     existing = [contact for contact in syncable if contact.google_resource_name]
+    google_people = fetch_google_people(credentials) if existing else []
+    google_by_resource = {
+        item.google_resource_name: item
+        for item in (parse_google_person(person) for person in google_people)
+        if item and item.google_resource_name
+    }
     created = 0
     updated = 0
     skipped = 0
+    field_conflicts = 0
     access_token = "" if dry_run else google_token(credentials)
     for contact in existing:
+        current_google = google_by_resource.get(contact.google_resource_name)
+        conflicts = google_push_conflicts(contact, current_google)
+        if conflicts:
+            field_conflicts += 1
+            skipped += 1
+            continue
         if dry_run:
             updated += 1
             continue
@@ -682,6 +809,8 @@ def push_gpa_contacts_to_google(session: Session, dry_run: bool = False, credent
         result = update_google_contact(access_token, contact)
         contact.google_etag = str(result.get("etag") or contact.google_etag or "").strip()
         contact.updated_at = datetime.now()
+        parsed_result = parse_google_person(result)
+        store_google_snapshot(contact, parsed_result or contact)
         session.add(contact)
         updated += 1
     for contact in missing:
@@ -696,6 +825,8 @@ def push_gpa_contacts_to_google(session: Session, dry_run: bool = False, credent
         contact.google_resource_name = resource_name
         contact.google_etag = str(result.get("etag") or "").strip()
         contact.updated_at = datetime.now()
+        parsed_result = parse_google_person(result)
+        store_google_snapshot(contact, parsed_result or contact)
         session.add(contact)
         created += 1
     if not dry_run:
@@ -708,7 +839,16 @@ def push_gpa_contacts_to_google(session: Session, dry_run: bool = False, credent
             )
         )
         session.commit()
-    return {"success": True, "created": created, "updated": updated, "skipped": skipped, "total": len(syncable), "dry_run": dry_run}
+    return {
+        "success": True,
+        "created": created,
+        "updated": updated,
+        "skipped": skipped,
+        "field_conflicts": field_conflicts,
+        "google_fetched": len(google_people),
+        "total": len(syncable),
+        "dry_run": dry_run,
+    }
 
 
 def sync_google_contacts_two_way(session: Session, dry_run: bool = False, credentials_path: Path | None = None) -> dict:
